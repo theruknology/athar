@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { EvalOut } from "../api/types";
 import { EVALUATION, RULES } from "../test/fixtures";
@@ -66,11 +66,36 @@ describe("EvaluationPage", () => {
   it("shows precision, recall and F1 at High+ and the per-rule confusion", async () => {
     renderWithProviders(<EvaluationPage />, { route: "/evaluation" });
 
-    expect(await screen.findByText("75.0%")).toBeInTheDocument();
-    expect(screen.getByText("97.3%")).toBeInTheDocument();
+    // Precision and recall appear twice by design: once as a headline tile, once beside their
+    // confidence interval. F1 is reported only in the evidence panel — it inherits both
+    // intervals, so it does not earn a tile.
+    expect(await screen.findAllByText("75.0%")).not.toHaveLength(0);
+    expect(screen.getAllByText("97.3%").length).toBeGreaterThan(0);
     expect(screen.getByText("84.7%")).toBeInTheDocument();
     // The rule's name comes from GET /rules, not from a table kept in the app.
     expect(await screen.findByText("Cross-cloud superuser")).toBeInTheDocument();
+  });
+
+  it("bounds a headline ratio with its confidence interval and its sample size", async () => {
+    renderWithProviders(<EvaluationPage />, { route: "/evaluation" });
+
+    // A bare "100%" is the number a judge is right to distrust. The interval and the denominator
+    // are what turn it into a claim the sample can carry.
+    expect(await screen.findByText(/61\.3% – 84\.9%/)).toBeInTheDocument();
+    expect(screen.getByText(/on 48 flagged/)).toBeInTheDocument();
+    expect(screen.getByText(/on 37 ground-truth positives/)).toBeInTheDocument();
+  });
+
+  it("says which rules the estate never exercised rather than scoring them zero", async () => {
+    renderWithProviders(<EvaluationPage />, { route: "/evaluation" });
+
+    // Flagged in two places by design: the evidence panel summarises it, the table marks the row.
+    expect(await screen.findAllByText("Not exercised")).not.toHaveLength(0);
+    expect(screen.getAllByText("Under-powered").length).toBeGreaterThan(0);
+    // R7 has no ground truth here; its ratios must read as undefined, never as 0%.
+    const r7 = screen.getByRole("link", { name: "R7" }).closest("tr");
+    expect(r7).not.toBeNull();
+    expect(within(r7 as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 
   it("names the source of the numbers without printing the API host's path", async () => {

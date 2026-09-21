@@ -4,18 +4,28 @@ export type { Cloud };
 
 export const CLOUDS: readonly Cloud[] = ["aws", "azure", "gcp"];
 
-export interface Monogram {
-  label: string;
-  text: string;
-  fill: string;
-  fg: string;
-}
+export const LABEL: Record<Cloud, string> = {
+  aws: "AWS",
+  azure: "Azure",
+  gcp: "Google Cloud",
+};
 
-/** Provider monograms — our own marks, not the providers' logos. */
-export const MONOGRAM: Record<Cloud, Monogram> = {
-  aws: { label: "AWS", text: "aws", fill: "#f59e0b", fg: "#1a1200" },
-  azure: { label: "Azure", text: "Az", fill: "#2563eb", fg: "#ffffff" },
-  gcp: { label: "GCP", text: "G", fill: "#16a34a", fg: "#ffffff" },
+/**
+ * Official provider marks, bundled under `public/logos/` rather than pulled from a CDN so the
+ * dashboard renders with no network. Used nominatively to identify whose estate a row came
+ * from; the marks remain the property of their respective owners.
+ */
+export const LOGO: Record<Cloud, string> = {
+  aws: `${import.meta.env.BASE_URL}logos/aws.png`,
+  azure: `${import.meta.env.BASE_URL}logos/azure.png`,
+  gcp: `${import.meta.env.BASE_URL}logos/gcp.png`,
+};
+
+/** Brand colours, for accents beside the logo (bars, rings) — not for redrawing the mark. */
+export const BRAND_COLOUR: Record<Cloud, string> = {
+  aws: "#ff9900",
+  azure: "#0089d6",
+  gcp: "#4285f4",
 };
 
 export function isCloud(value: unknown): value is Cloud {
@@ -23,5 +33,5 @@ export function isCloud(value: unknown): value is Cloud {
 }
 
 export function cloudLabel(cloud: string): string {
-  return isCloud(cloud) ? MONOGRAM[cloud].label : cloud.toUpperCase();
+  return isCloud(cloud) ? LABEL[cloud] : cloud.toUpperCase();
 }

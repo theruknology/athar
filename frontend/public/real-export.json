@@ -1,24 +1,153 @@
 {
   "source": "Cloudsplaining example estate (Salesforce, BSD-3) \u2014 native aws get-account-authorization-details; account IDs sanitised to 012345678901",
-  "generated_at": "2026-09-16T18:24:18+00:00",
+  "generated_at": "2026-09-17T14:20:46+00:00",
   "file_bytes": 823925,
   "principals": 122,
-  "grants": 1124,
-  "unmapped_actions": 2512,
-  "findings_total": 318,
+  "grants": 1149,
+  "unmapped_actions": 0,
+  "actions_referenced": 1149,
+  "coverage_pct": 100.0,
+  "coverage_before_pct": 30.9,
+  "privileged_principals": 73,
+  "privileged_grants": 191,
+  "max_blast_radius_pct": 100.0,
+  "grants_by_category": {
+    "security": 368,
+    "identity": 276,
+    "compute": 144,
+    "data": 119,
+    "storage": 114,
+    "network": 100,
+    "billing": 28
+  },
+  "grants_by_verb": {
+    "read": 456,
+    "write": 328,
+    "admin": 130,
+    "impersonate": 86,
+    "delete": 68,
+    "grant": 56,
+    "unknown": 17,
+    "billing": 8
+  },
+  "top_principals": [
+    {
+      "name": "AWS-QuickSetup-StackSet-Local-AdministrationRole",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R10",
+        "R5"
+      ]
+    },
+    {
+      "name": "AWS-QuickSetup-StackSet-Local-ExecutionRole",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R1",
+        "R10",
+        "R5",
+        "R7"
+      ]
+    },
+    {
+      "name": "MyOtherRole",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R0",
+        "R10",
+        "R5"
+      ]
+    },
+    {
+      "name": "MyRole",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R0",
+        "R10",
+        "R5"
+      ]
+    },
+    {
+      "name": "OrganizationAccountAccessRole",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R1",
+        "R10",
+        "R5",
+        "R7"
+      ]
+    },
+    {
+      "name": "OverprivilegedEC2",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R10",
+        "R2",
+        "R5"
+      ]
+    },
+    {
+      "name": "AWSReservedSSO_AdministratorAccess_dc6414f7f2ab04fc",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R1",
+        "R10",
+        "R2",
+        "R5",
+        "R7"
+      ]
+    },
+    {
+      "name": "AWSServiceRoleForAmazonSSM",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R10",
+        "R2",
+        "R5",
+        "R7"
+      ]
+    },
+    {
+      "name": "fn1-privesc3-partial-role",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R10",
+        "R5"
+      ]
+    },
+    {
+      "name": "fn3-exploitableConditionConstraint-role",
+      "score": 100,
+      "blast_radius_pct": 100.0,
+      "rules": [
+        "R10",
+        "R5"
+      ]
+    }
+  ],
+  "findings_total": 283,
   "identities_flagged": 122,
   "by_severity": {
     "Critical": 0,
     "High": 90,
     "Medium": 147,
-    "Low": 81
+    "Low": 46
   },
   "rules": [
     {
       "rule_id": "R0",
       "name": "Unmapped permission",
       "severity": "Low",
-      "count": 45
+      "count": 11
     },
     {
       "rule_id": "R1",
@@ -42,7 +171,7 @@
       "rule_id": "R7",
       "name": "Peer outlier",
       "severity": "Low",
-      "count": 36
+      "count": 35
     },
     {
       "rule_id": "R10",
@@ -109,6 +238,6 @@
       "name": "fp2-allow-and-deny-multiple-policies-user"
     }
   ],
-  "r7_real": 36,
+  "r7_real": 35,
   "r7_synthetic": 0
 }

@@ -8,7 +8,10 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": { "@app/*": ["../frontend/src/*"] }
   },
   "include": ["src"]
 }

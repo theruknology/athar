@@ -1,21 +1,44 @@
 import React from "react";
-import { AbsoluteFill, Sequence, interpolate, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Loop, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame } from "remotion";
 import "./fonts";
+import "./app.css";
 import { C, MONO, SANS } from "./theme";
 import { Brand } from "./components/kit";
-import { Callout, Caption, Cursor, Flare, Kinetic, Screen, Shot, ease } from "./components/tour";
+import { StatCards } from "./components/cards";
+import { BigNumber, CloudPanel, Departments, HeadlineTiles, PosturePanel } from "./scenes/dashboard";
+import { Callout, Caption, ChatSkin, Cursor, Flare, Kinetic, Screen, Shot, Wipe, ease } from "./components/tour";
 
-/* ------------------------------------------------------------- backdrop */
-const Backdrop: React.FC = () => {
+/* ------------------------------------------------------------- backdrop
+ * A slow-drifting silk/aurora loop replaces the flat gradient — the whole
+ * film sits on a living surface instead of a static plane. Dimmed hard and
+ * vignetted so it reads as atmosphere, never competes with the UI in front.
+ */
+const Backdrop: React.FC<{ tint?: string }> = ({ tint }) => {
   const frame = useCurrentFrame();
   const d = Math.sin(frame / 150) * 12;
   return (
-    <AbsoluteFill
-      style={{
-        background: `radial-gradient(1500px 780px at ${80 + d / 10}% -10%, rgba(39,198,223,.13), transparent 60%),
-                     radial-gradient(1200px 780px at -6% 112%, rgba(11,124,147,.18), transparent 55%), ${C.bg}`,
-      }}
-    >
+    <AbsoluteFill style={{ background: C.bg }}>
+      <Loop durationInFrames={1200}>
+        <OffthreadVideo
+          src={staticFile("bg/stock.mp4")}
+          muted
+          playbackRate={0.5}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "brightness(.34) saturate(1.2) contrast(1.06)",
+            opacity: 0.85,
+          }}
+        />
+      </Loop>
+      <AbsoluteFill
+        style={{
+          background: `radial-gradient(1500px 820px at ${80 + d / 10}% -10%, rgba(39,198,223,.14), transparent 60%),
+                       radial-gradient(1300px 1000px at 50% 55%, rgba(6,10,14,.28), rgba(6,10,14,.86) 76%),
+                       ${tint ?? ""}`,
+        }}
+      />
       <div
         style={{
           position: "absolute",
@@ -24,12 +47,13 @@ const Backdrop: React.FC = () => {
           right: 0,
           height: 5,
           background: `linear-gradient(90deg,${C.cyanDeep},#1596b0 45%,${C.cyan})`,
+          boxShadow: `0 0 24px rgba(39,198,223,.6)`,
         }}
       />
       <AbsoluteFill
         style={{
           backgroundImage:
-            "linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px)",
+            "linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px)",
           backgroundSize: "72px 72px",
           maskImage: "radial-gradient(circle at 50% 40%, black, transparent 82%)",
         }}
@@ -94,6 +118,36 @@ const Open: React.FC = () => {
         <div style={{ marginTop: 20, display: "flex", justifyContent: "center" }}>
           <Kinetic text="Multi-cloud access governance." at={34} size={26} weight={300} color={C.muted} />
         </div>
+        <div style={{ marginTop: 32, display: "flex", justifyContent: "center", gap: 12 }}>
+          {[
+            { label: "AWS", color: "#F5A623" },
+            { label: "Azure", color: "#3E8EED" },
+            { label: "GCP", color: "#34A853" },
+            { label: "MCP", color: C.cyan },
+          ].map((chip, i) => {
+            const at = 58 + i * 6;
+            const p = ease(frame, at, at + 16);
+            return (
+              <div
+                key={chip.label}
+                style={{
+                  opacity: p,
+                  transform: `translateY(${(1 - p) * 10}px)`,
+                  padding: "8px 18px",
+                  borderRadius: 999,
+                  border: `1px solid ${chip.color}55`,
+                  background: `${chip.color}14`,
+                  boxShadow: `0 0 20px ${chip.color}33`,
+                  font: `500 15px/1 ${MONO}`,
+                  color: C.fg,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {chip.label}
+              </div>
+            );
+          })}
+        </div>
       </div>
       <Flare at={22} len={52} y={46} power={0.85} />
     </AbsoluteFill>
@@ -101,60 +155,68 @@ const Open: React.FC = () => {
 };
 
 /* ------------------------------------------------------------- MCP terminal */
+/**
+ * Same MCP server, three different chat agents. A fast blur wipe hops between
+ * them — the point is that switching clients takes nothing on ATHAR's side.
+ */
 const Mcp: React.FC = () => {
-  const frame = useCurrentFrame();
-  const ent = ease(frame, 0, 34);
-  const rows: [React.ReactNode, number][] = [
-    [<span><span style={{ color: C.cyan }}>$</span> athar-mcp <span style={{ color: C.faint }}>▸ analyst</span></span>, 10],
-    [<span><span style={{ color: C.ok }}>→</span> list_identities <span style={{ color: C.faint }}>· 507 identities</span></span>, 24],
-    [<span><span style={{ color: C.ok }}>→</span> explain_finding <span style={{ color: C.faint }}>· R4 · proof-bound</span></span>, 36],
-    [<span><span style={{ color: C.ok }}>→</span> propose_remediation <span style={{ color: C.cyan }}>−12.8%</span> <span style={{ color: C.ok }}>[ok]</span></span>, 48],
-    [<span>&nbsp;</span>, 60],
-    [<span><span style={{ color: C.cyan }}>$</span> athar-mcp <span style={{ color: C.faint }}>▸ viewer</span></span>, 68],
-    [<span><span style={{ color: C.ok }}>→</span> list_identities <span style={{ color: C.faint }}>· ok</span></span>, 80],
-    [<span><span style={{ color: C.crit }}>→</span> propose_remediation</span>, 92],
-    [<span style={{ color: C.crit }}>&nbsp;&nbsp;&nbsp;✕ 403 · requires role analyst</span>, 102],
-  ];
-  const flash = ease(frame, 102, 116);
   return (
-    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", fontFamily: SANS, perspective: 2300 }}>
-      <div
-        style={{
-          width: 1260,
-          borderRadius: 22,
-          overflow: "hidden",
-          border: `1px solid ${flash > 0 ? `rgba(255,106,94,${0.25 + flash * 0.4})` : C.border2}`,
-          background: "#0a0f14",
-          boxShadow: `0 60px 140px rgba(0,0,0,.66), inset 0 1px 0 rgba(255,255,255,.08)${
-            flash > 0 ? `, 0 0 70px rgba(255,106,94,${flash * 0.26})` : ""
-          }`,
-          opacity: ent,
-          transform: `translateY(${(1 - ent) * 220}px) rotateX(${
-            interpolate(ent, [0, 1], [13, 0]) + Math.sin(frame / 105) * 0.6
-          }deg) scale(${interpolate(ent, [0, 1], [0.94, 1])})`,
-          transformStyle: "preserve-3d",
-        }}
-      >
-        <div style={{ height: 40, background: "#0f1720", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 9, padding: "0 18px" }}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} style={{ width: 11, height: 11, borderRadius: 999, background: "#2a3a48" }} />
-          ))}
-          <span style={{ marginLeft: 16, font: `400 14px/1 ${MONO}`, color: C.faint }}>
-            ATHAR-MCP · model context protocol
-          </span>
-        </div>
-        <div style={{ padding: "34px 44px", font: `400 27px/1.85 ${MONO}`, color: C.fg }}>
-          {rows.map(([node, at], i) => {
-            const p = ease(frame, at, at + 10);
-            return (
-              <div key={i} style={{ opacity: p, transform: `translateX(${(1 - p) * 14}px)` }}>
-                {node}
-              </div>
-            );
-          })}
-        </div>
+    <AbsoluteFill style={{ fontFamily: SANS }}>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ChatSkin
+          name="Claude"
+          tag="claude.ai"
+          glyphColor="#27C6DF"
+          bornAt={0}
+          outAt={96}
+          userText="Show me the riskiest identity right now."
+          typeAt={6}
+          typeLen={30}
+          toolAt={38}
+          toolLabel="athar-mcp → explain_finding(R4)"
+          replyAt={52}
+          replyLines={[
+            { text: "Hamad Al Ketbi — score 100, admin in all 3 clouds.", at: 0 },
+            { text: "Reach 70% of the estate. Open since Sep 2025.", at: 10 },
+          ]}
+        />
       </div>
-      <Flare at={104} len={40} y={52} power={0.5} />
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ChatSkin
+          name="ChatGPT"
+          tag="chatgpt.com"
+          glyphColor="#19C37D"
+          bornAt={100}
+          outAt={168}
+          userText="draft a fix for the cross-cloud superuser finding"
+          typeAt={104}
+          typeLen={22}
+          toolAt={130}
+          toolLabel="athar-mcp → propose_remediation"
+          replyAt={142}
+          replyLines={[{ text: "Plan drafted — blast radius 69.9% → 0.0%. Awaiting approval.", at: 0 }]}
+        />
+      </div>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ChatSkin
+          name="Gemini"
+          tag="gemini.google.com · viewer"
+          glyphColor="#4285F4"
+          bornAt={172}
+          userText="apply that remediation plan now"
+          typeAt={176}
+          typeLen={22}
+          toolAt={202}
+          toolLabel="✕ propose_remediation — 403 requires role analyst"
+          toolDenied
+          replyAt={216}
+          replyLines={[{ text: "✕ I can't approve or apply changes — only read and propose.", at: 0 }]}
+        />
+      </div>
+      <Wipe at={92} />
+      <Wipe at={166} />
+      <Flare at={92} len={26} y={50} power={0.6} />
+      <Flare at={166} len={26} y={50} power={0.6} />
     </AbsoluteFill>
   );
 };
@@ -204,6 +266,8 @@ const D = {
   ovWide: 152,
   ovStats: 150,
   ovNever: 142,
+  ovPosture: 150,
+  ovClouds: 150,
   idWide: 168,
   idScore: 152,
   idCloud: 122,
@@ -214,14 +278,18 @@ const D = {
   tlHalf: 132,
   reWide: 142,
   reStats: 176,
+  reCoverage: 155,
   reRules: 132,
+  evalHonest: 165,
+  proofCards: 200,
   ledger: 142,
-  mcp: 238,
+  mcp: 250,
   close: 140,
 };
 /** Beats overlap so every cut is a dissolve, never a flash. */
 const LAP = 11;
-export const DURATION = Object.values(D).reduce((a, b) => a + b, 0) - LAP * 17;
+export const DURATION =
+  Object.values(D).reduce((a, b) => a + b, 0) - LAP * (Object.keys(D).length - 1);
 
 export const AtharVideo: React.FC = () => {
   let t = 0;
@@ -243,46 +311,57 @@ export const AtharVideo: React.FC = () => {
       {/* 2 · overview — the screen rises in */}
       <Sequence from={seq(D.ovWide)} durationInFrames={D.ovWide}>
         <Shot>
-          <Screen src="shots/overview.png" from={{ x: 50, y: 12, z: 1.0 }} to={{ x: 50, y: 20, z: 1.06 }} rise={360} tilt={17} sweep={34} />
+          <Screen shot="overview" to={{ x: 50, y: 34, z: 1.06 }} rise={360} tilt={17} sweep={34} />
           <Cursor path={[[52, 96], [46, 62], [44, 58]]} at={40} step={20} hideAt={132} />
-          <Caption kicker="Overview" text="One estate. Three clouds." accent={["Three"]} />
+          <Caption kicker="Overview" text="One government estate. Three different clouds." accent={["Three"]} />
           <Flare at={6} len={46} y={54} power={0.7} />
         </Shot>
       </Sequence>
 
-      {/* 3 · stat tiles */}
+      {/* 3 · headline tiles — the real components, assembling one by one */}
       <Sequence from={seq(D.ovStats)} durationInFrames={D.ovStats}>
         <Shot>
-          <Screen
-            src="shots/overview.png"
-            from={{ x: 35, y: 24, z: 1.06 }}
-            to={{ x: 35, y: 24, z: 1.4 }}
-            move={[0, 46]}
-            ring={{ at: 42, w: 42, h: 12 }}
-            rise={120}
-            tilt={6}
-          />
-          <Cursor path={[[38, 66], [30, 34]]} at={16} step={22} clickAt={[44]} hideAt={124} />
-          <Caption text="507 identities, one model." accent={["507"]} at={26} />
+          <HeadlineTiles at={10} />
+          <Caption text="Five hundred and seven people and machines. One list." accent={["One"]} at={70} size={30} />
         </Shot>
       </Sequence>
 
-      {/* 4 · half-life */}
+      {/* 4 · departments — where the root cause shows up */}
       <Sequence from={seq(D.ovNever)} durationInFrames={D.ovNever}>
         <Shot>
-          <Screen src="shots/overview.png" from={{ x: 30, y: 56, z: 1.18 }} to={{ x: 30, y: 60, z: 1.4 }} move={[0, 46]} rise={110} tilt={5} />
-          <Cursor path={[[60, 40], [33, 61]]} at={12} step={24} clickAt={[40]} hideAt={118} />
-          <Callout label="offboarding · Never" x={35} y={61} dir="right" at={40} len={150} />
-          <Caption text="Granted — and never taken away." accent={["never"]} at={16} />
+          <Departments at={10} />
+          <Caption text="Access gets granted. It never gets taken back." accent={["never"]} at={58} size={30} />
+        </Shot>
+      </Sequence>
+
+      {/* 4b · privilege posture */}
+      <Sequence from={seq(D.ovPosture)} durationInFrames={D.ovPosture}>
+        <Shot>
+          <PosturePanel at={8} />
+          <Caption
+            kicker="Privilege posture"
+            text="Not how many alerts. How much power."
+            accent={["power."]}
+            at={62}
+            size={30}
+          />
+        </Shot>
+      </Sequence>
+
+      {/* 4c · one card per cloud, dealt left to right */}
+      <Sequence from={seq(D.ovClouds)} durationInFrames={D.ovClouds}>
+        <Shot>
+          <CloudPanel at={8} />
+          <Caption text="Three clouds. One page. Same questions of each." accent={["One"]} at={62} size={30} />
         </Shot>
       </Sequence>
 
       {/* 5 · identities */}
       <Sequence from={seq(D.idWide)} durationInFrames={D.idWide}>
         <Shot>
-          <Screen src="shots/identities.png" from={{ x: 50, y: 14, z: 1.0 }} to={{ x: 50, y: 26, z: 1.1 }} rise={330} tilt={16} sweep={30} />
+          <Screen shot="identities" to={{ x: 50, y: 22, z: 1.12 }} rise={330} tilt={16} sweep={30} />
           <Cursor path={[[80, 88], [58, 48], [55, 42], [55, 42]]} at={26} step={20} clickAt={[86]} />
-          <Caption kicker="Identities" text="Every identity, ranked by risk." accent={["ranked"]} />
+          <Caption kicker="Identities" text="Everyone who holds access, ranked by risk." accent={["ranked"]} />
           <Flare at={4} len={44} y={50} power={0.7} />
         </Shot>
       </Sequence>
@@ -291,31 +370,40 @@ export const AtharVideo: React.FC = () => {
       <Sequence from={seq(D.idScore)} durationInFrames={D.idScore}>
         <Shot>
           <Screen
-            src="shots/identities.png"
-            from={{ x: 54, y: 45, z: 1.15 }}
-            to={{ x: 54, y: 45, z: 1.46 }}
-            move={[0, 46]}
-            ring={{ at: 42, w: 17, h: 26 }}
+            shot="identities"
+            from={{ x: 50, y: 22, z: 1.12 }}
+            to="scoreColumn"
+            fill={0.55}
+            move={[0, 48]}
+            spot={{ region: "scoreColumn", at: 46 }}
             rise={110}
             tilt={5}
           />
-          <Cursor path={[[40, 70], [55, 50]]} at={14} step={22} hideAt={126} />
-          <Caption text="Measured blast radius — not a hand-picked number." accent={["Measured"]} at={22} size={30} pos="br" />
+          <Caption text="How much of the estate this account can reach." accent={["reach."]} at={22} size={30} pos="br" />
         </Shot>
       </Sequence>
 
       {/* 7 · cross-cloud */}
       <Sequence from={seq(D.idCloud)} durationInFrames={D.idCloud}>
         <Shot>
-          <Screen src="shots/identities.png" from={{ x: 46, y: 45, z: 1.5 }} to={{ x: 46, y: 45, z: 1.72 }} move={[0, 40]} ring={{ at: 34, w: 9, h: 22 }} rise={90} tilt={4} />
-          <Caption text="Admin in AWS, Azure and GCP at once." accent={["AWS,", "Azure", "GCP"]} at={14} />
+          <Screen
+            shot="identities"
+            from="scoreColumn"
+            to="cloudsColumn"
+            fill={0.45}
+            move={[0, 42]}
+            spot={{ region: "cloudsColumn", at: 38 }}
+            rise={90}
+            tilt={4}
+          />
+          <Caption text="Full admin in all three clouds. At the same time." accent={["all", "three"]} at={14} />
         </Shot>
       </Sequence>
 
       {/* 8 · drill-down */}
       <Sequence from={seq(D.drHero)} durationInFrames={D.drHero}>
         <Shot>
-          <Screen src="shots/identity-detail.png" from={{ x: 40, y: 16, z: 1.02 }} to={{ x: 36, y: 26, z: 1.35 }} rise={340} tilt={16} sweep={28} />
+          <Screen shot="identity-detail" to={{ x: 45, y: 40, z: 1.18 }} rise={340} tilt={16} sweep={28} />
           <Cursor path={[[24, 78], [20, 30]]} at={22} step={22} hideAt={110} />
           <Caption kicker="Why a 100" text="Open it — the score is in the open." accent={["open."]} />
           <Flare at={4} len={46} y={48} power={0.8} />
@@ -326,35 +414,42 @@ export const AtharVideo: React.FC = () => {
       <Sequence from={seq(D.drFormula)} durationInFrames={D.drFormula}>
         <Shot>
           <Screen
-            src="shots/identity-detail.png"
-            from={{ x: 42, y: 68, z: 1.3 }}
-            to={{ x: 42, y: 70, z: 1.55 }}
-            move={[0, 50]}
-            ring={{ at: 46, w: 44, h: 11 }}
+            shot="identity-detail"
+            from={{ x: 45, y: 40, z: 1.18 }}
+            to="score"
+            fill={0.9}
+            move={[0, 52]}
+            spot={{ region: "score", at: 50 }}
             rise={110}
             tilt={5}
           />
-          <Cursor path={[[70, 40], [40, 80]]} at={16} step={26} hideAt={120} />
-          <Callout label="reach × exploitability × controls" x={54} y={72} dir="right" at={58} len={130} out={D.drFormula - 14} />
-          <Caption text="You can read the formula, term by term." accent={["formula,"]} at={20} />
+          <Caption text="Every number shows its working." accent={["working."]} at={20} />
         </Shot>
       </Sequence>
 
       {/* 10 · causal history */}
       <Sequence from={seq(D.drCausal)} durationInFrames={D.drCausal}>
         <Shot>
-          <Screen src="shots/identity-detail.png" from={{ x: 80, y: 60, z: 1.3 }} to={{ x: 80, y: 70, z: 1.44 }} move={[0, 46]} rise={100} tilt={5} />
-          <Cursor path={[[45, 45], [78, 70]]} at={12} step={24} hideAt={124} />
-          <Caption text="And the exact grants that caused it." accent={["grants"]} at={14} />
+          <Screen
+            shot="identity-detail"
+            from="score"
+            to="history"
+            fill={0.88}
+            move={[0, 48]}
+            spot={{ region: "history", at: 44 }}
+            rise={100}
+            tilt={5}
+          />
+          <Caption text="And exactly which permissions caused it." accent={["which"]} at={14} />
         </Shot>
       </Sequence>
 
       {/* 11 · timeline */}
       <Sequence from={seq(D.tlWide)} durationInFrames={D.tlWide}>
         <Shot>
-          <Screen src="shots/timeline.png" from={{ x: 50, y: 20, z: 1.0 }} to={{ x: 50, y: 40, z: 1.22 }} rise={340} tilt={16} sweep={30} />
-          <Cursor path={[[70, 90], [22, 24], [22, 24]]} at={26} step={22} clickAt={[74]} hideAt={140} />
-          <Caption kicker="Timeline" text="A year of drift, replayed." accent={["drift,"]} />
+          <Screen shot="timeline" to="chart" fill={0.9} move={[0, 60]} rise={340} tilt={16} sweep={30} />
+          <Cursor path={[[70, 90], [40, 44], [40, 44]]} at={26} step={22} clickAt={[74]} hideAt={140} />
+          <Caption kicker="Timeline" text="A full year, replayed." accent={["year,"]} />
           <Flare at={4} len={46} y={52} power={0.7} />
         </Shot>
       </Sequence>
@@ -362,17 +457,26 @@ export const AtharVideo: React.FC = () => {
       {/* 12 · half-life curve */}
       <Sequence from={seq(D.tlHalf)} durationInFrames={D.tlHalf}>
         <Shot>
-          <Screen src="shots/timeline.png" from={{ x: 50, y: 60, z: 1.3 }} to={{ x: 50, y: 66, z: 1.36 }} move={[0, 44]} rise={90} tilt={4} />
-          <Caption text="Permission half-life: a broken process, not risky people." accent={["half-life:"]} at={14} size={30} />
+          <Screen
+            shot="timeline"
+            from="chart"
+            to="halflife"
+            fill={0.9}
+            move={[0, 44]}
+            spot={{ region: "halflife", at: 42 }}
+            rise={90}
+            tilt={4}
+          />
+          <Caption text="This is a broken process. Not twelve careless people." accent={["process."]} at={14} size={30} />
         </Shot>
       </Sequence>
 
       {/* 13 · real export */}
       <Sequence from={seq(D.reWide)} durationInFrames={D.reWide}>
         <Shot>
-          <Screen src="shots/realexport.png" from={{ x: 50, y: 14, z: 1.0 }} to={{ x: 50, y: 24, z: 1.14 }} rise={350} tilt={17} sweep={30} />
+          <Screen shot="realexport" to={{ x: 50, y: 30, z: 1.1 }} rise={350} tilt={17} sweep={30} />
           <Cursor path={[[75, 90], [30, 34]]} at={24} step={22} hideAt={116} />
-          <Caption kicker="Real export" text="Same engine. A real AWS export." accent={["real"]} />
+          <Caption kicker="Real export" text="Now the same system, on a real AWS account." accent={["real"]} />
           <Flare at={4} len={48} y={50} power={0.85} />
         </Shot>
       </Sequence>
@@ -381,33 +485,97 @@ export const AtharVideo: React.FC = () => {
       <Sequence from={seq(D.reStats)} durationInFrames={D.reStats}>
         <Shot>
           <Screen
-            src="shots/realexport.png"
-            from={{ x: 50, y: 30, z: 1.2 }}
-            to={{ x: 62, y: 30, z: 1.44 }}
+            shot="realexport"
+            from={{ x: 50, y: 30, z: 1.1 }}
+            to="headline"
+            fill={0.94}
             move={[0, 52]}
-            ring={{ at: 56, w: 26, h: 16 }}
-            rise={110}
-            tilt={5}
+            spot={{ region: "r7Tile", at: 58 }}
           />
-          <Cursor path={[[35, 70], [66, 34]]} at={16} step={26} hideAt={150} />
-          <Caption text="318 findings. R7 fires 36 times — zero on synthetic." accent={["318", "36"]} at={30} size={30} pos="br" />
+          <Caption text="283 findings. On data we did not write." accent={["283"]} at={30} size={30} pos="br" />
+        </Shot>
+      </Sequence>
+
+      {/* 14b · the coverage number, given the whole frame */}
+      <Sequence from={seq(D.reCoverage)} durationInFrames={D.reCoverage}>
+        <Shot>
+          <BigNumber
+            label="Of a real AWS export"
+            value="100%"
+            note="of the permissions were understood. Our first attempt managed thirty-one."
+            at={10}
+            tone={C.ok}
+          />
+          <Flare at={6} len={50} y={46} power={0.7} />
         </Shot>
       </Sequence>
 
       {/* 15 · rule table */}
       <Sequence from={seq(D.reRules)} durationInFrames={D.reRules}>
         <Shot>
-          <Screen src="shots/realexport.png" from={{ x: 50, y: 58, z: 1.25 }} to={{ x: 50, y: 62, z: 1.34 }} move={[0, 42]} rise={90} tilt={4} />
-          <Caption text="Landing on genuinely admin and privesc roles." accent={["privesc"]} at={14} size={30} />
+          <Screen
+            shot="realexport"
+            from="coverageTile"
+            to="worst"
+            fill={0.9}
+            move={[0, 44]}
+            spot={{ region: "worst", at: 42 }}
+            rise={90}
+            tilt={4}
+          />
+          <Caption text="And it lands on the genuinely dangerous accounts." accent={["dangerous"]} at={14} size={30} />
+        </Shot>
+      </Sequence>
+
+      {/* 15b · the evaluation says what it cannot prove */}
+      <Sequence from={seq(D.evalHonest)} durationInFrames={D.evalHonest}>
+        <Shot>
+          <Screen
+            shot="evaluation"
+            from="headline"
+            to="strength"
+            fill={0.9}
+            move={[10, 70]}
+            spot={{ region: "strength", at: 66 }}
+            rise={330}
+            tilt={15}
+            sweep={30}
+          />
+          <Caption
+            kicker="Evaluation"
+            text="We score 100%. Here is why you should not just take our word."
+            accent={["not"]}
+            at={20}
+            size={29}
+          />
+          <Flare at={4} len={46} y={50} power={0.75} />
+        </Shot>
+      </Sequence>
+
+      {/* 15c · the three numbers we want a judge to leave with */}
+      <Sequence from={seq(D.proofCards)} durationInFrames={D.proofCards}>
+        <Shot>
+          <StatCards
+            kicker="What we would rather be judged on"
+            title="Results on data we did not write"
+            at={16}
+            stagger={10}
+            cards={[
+              { value: "100%", label: "Understood", note: "of the permissions in a real AWS account", tone: C.ok },
+              { value: "283", label: "Findings", note: "on 122 real accounts, with no answer key to mark ourselves against" },
+              { value: "35", label: "Caught for real", note: "by a rule that finds nothing at all in our own test data", tone: C.high },
+            ]}
+          />
+          <Flare at={8} len={52} y={48} power={0.8} />
         </Shot>
       </Sequence>
 
       {/* 16 · ledger */}
       <Sequence from={seq(D.ledger)} durationInFrames={D.ledger}>
         <Shot>
-          <Screen src="shots/ledger.png" from={{ x: 50, y: 22, z: 1.04 }} to={{ x: 50, y: 38, z: 1.35 }} rise={330} tilt={16} sweep={28} />
+          <Screen shot="ledger" to="table" fill={0.9} move={[0, 60]} rise={330} tilt={16} sweep={28} />
           <Cursor path={[[68, 86], [40, 46], [40, 46]]} at={24} step={22} clickAt={[74]} hideAt={132} />
-          <Caption kicker="Ledger" text="Anchored on-chain. Verify it yourself." accent={["Verify"]} />
+          <Caption kicker="Ledger" text="Sealed on-chain. Check it without trusting us." accent={["without"]} />
           <Flare at={4} len={46} y={50} power={0.75} />
         </Shot>
       </Sequence>
@@ -416,7 +584,7 @@ export const AtharVideo: React.FC = () => {
       <Sequence from={seq(D.mcp)} durationInFrames={D.mcp}>
         <Shot>
           <Mcp />
-          <Caption kicker="ATHAR-MCP" text="Any AI can query it. None of them can decide." accent={["None"]} at={120} out={D.mcp - 12} size={31} />
+          <Caption kicker="ATHAR-MCP" text="Any AI can ask. None of them can act." accent={["None"]} at={228} out={D.mcp - 12} size={29} />
         </Shot>
       </Sequence>
 

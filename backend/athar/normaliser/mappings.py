@@ -126,15 +126,42 @@ def _is_glob(key: str) -> bool:
     return "*" in key or "?" in key
 
 
+@lru_cache(maxsize=1)
+def _derived_catalog() -> dict[str, dict[str, str]]:
+    """Service→category table derived from the public IAM catalogues.
+
+    Generated offline by ``scripts/build_service_catalog.py`` from AWS's Service Authorization
+    Reference, Azure's provider operations and GCP's IAM permissions list. It exists because the
+    hand-written ``services:`` blocks only ever covered the services the synthetic generator
+    emits; a real export references the whole provider surface. Missing file is not an error —
+    the curated tables still work on their own, just with lower coverage.
+    """
+    try:
+        data = _read_yaml("service_catalog.yaml")
+    except Exception:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for cloud, entries in dict(data.get("services", {})).items():
+        table: dict[str, str] = {}
+        for prefix, node in dict(entries).items():
+            category = str(node["category"]) if isinstance(node, dict) else str(node)
+            if category in CATEGORIES:
+                table[str(prefix).lower()] = category
+        out[str(cloud).lower()] = table
+    return out
+
+
 @lru_cache(maxsize=3)
 def load_mapping(cloud: str) -> ProviderMapping:
     if cloud not in ("aws", "azure", "gcp"):
         raise MappingError(f"no mapping for cloud {cloud!r}")
     data = _read_yaml(f"{cloud}.yaml")
-    services = {str(k).lower(): str(v) for k, v in dict(data.get("services", {})).items()}
-    for cat in services.values():
+    curated = {str(k).lower(): str(v) for k, v in dict(data.get("services", {})).items()}
+    for cat in curated.values():
         if cat not in CATEGORIES:
             raise MappingError(f"{cloud}.yaml services: unknown category {cat!r}")
+    # Curated entries win: the derived catalogue only fills prefixes nobody hand-tuned.
+    services = {**_derived_catalog().get(cloud, {}), **curated}
 
     actions: dict[str, MappingEntry] = {}
     globs: list[tuple[str, MappingEntry]] = []

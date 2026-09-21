@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { getEstateSummary } from "../api/endpoints";
 import { queryKeys } from "../api/queryKeys";
 import { LedgerStatusBadge } from "../components/LedgerStatusBadge";
+import { CloudPosturePanel } from "../components/overview/CloudPosturePanel";
 import { DepartmentCard } from "../components/overview/DepartmentCard";
+import { GovernanceDetailTiles, GovernanceTiles } from "../components/overview/GovernanceTiles";
 import { ScanActions } from "../components/overview/ScanActions";
 import { SeverityHistogram } from "../components/overview/SeverityHistogram";
 import { Badge } from "../components/ui/Badge";
@@ -89,6 +91,23 @@ export function OverviewPage() {
               to="/identities"
             />
           </div>
+
+          <Card
+            title="Privilege posture"
+            subtitle="How much control the estate hands out, how much of it is unprotected, and how far the worst account reaches"
+          >
+            <div className="flex flex-col gap-3">
+              <GovernanceTiles metrics={data.governance} />
+              <GovernanceDetailTiles metrics={data.governance} />
+            </div>
+          </Card>
+
+          <Card
+            title="Clouds"
+            subtitle="One card per provider — status is derived from the exports ingested, never configured"
+          >
+            <CloudPosturePanel rows={data.clouds} />
+          </Card>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <Card

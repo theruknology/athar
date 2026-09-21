@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import random
 import uuid
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ from athar.api.schemas import (
     ApplyResult,
     CausalStepOut,
     Cloud,
+    CloudPosture,
     CredentialOut,
     DecisionKind,
     DecisionOut,
@@ -46,6 +48,7 @@ from athar.api.schemas import (
     ExceptionRequest,
     ExceptionType,
     FindingOut,
+    GovernanceMetrics,
     GrantOut,
     HalfLifeLabel,
     HalfLifeOut,
@@ -90,6 +93,7 @@ from athar.api.schemas import (
 from athar.clock import month_end, month_label
 from athar.config import EMAIL_DOMAIN, Settings
 from athar.detection.registry import all_rules
+from athar.eval.harness import MIN_SUPPORT, wilson_interval
 from athar.hashing import (
     canonical_json,
     finding_instance,
@@ -100,6 +104,8 @@ from athar.hashing import (
 )
 from athar.ledger import merkle
 from athar.security.auth import AuthUser
+from athar.services.queries import _PRIVILEGED_SCOPES as PRIVILEGED_SCOPES
+from athar.services.queries import PRIVILEGE_VERBS
 
 MOCK_NOW = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)  # fixed: the mock never reads the wall clock
 MOCK_MONTH = 12
@@ -1314,6 +1320,9 @@ class MockRepo:
                     fn=n,
                     precision=round(t / (t + p), 3) if t + p else None,
                     recall=round(t / (t + n), 3) if t + n else None,
+                    support=t + n,
+                    exercised=t + n > 0,
+                    underpowered=0 < t + n < MIN_SUPPORT,
                 )
             )
         precision, recall = tp / (tp + fp), tp / (tp + fn)
@@ -1346,9 +1355,16 @@ class MockRepo:
             precision=round(precision, 3),
             recall=round(recall, 3),
             f1=round(f1, 3),
+            precision_ci=list(wilson_interval(tp, tp + fp)),
+            recall_ci=list(wilson_interval(tp, tp + fn)),
             tp=tp,
             fp=fp,
             fn=fn,
+            rules_total=len(per_rule),
+            rules_exercised=sum(1 for r in per_rule if r.exercised),
+            rules_underpowered=[r.rule_id for r in per_rule if r.underpowered],
+            rules_unexercised=[r.rule_id for r in per_rule if not r.exercised],
+            min_support=MIN_SUPPORT,
             per_rule=per_rule,
             decoys=decoys,
             director_sentence=f"Of {tp + fp} accounts flagged, {tp} are verified genuine risks; {fp} are known exceptions the system now recognises.",
@@ -1472,6 +1488,111 @@ class MockRepo:
     def current_month(self) -> int | None:
         return self.month
 
+    def _privileged_clouds(self) -> dict[str, set[Cloud]]:
+        """identity_id → clouds where it holds a control verb at org/global scope.
+
+        Mirrors `services.queries._privileged_identities` exactly; the mock is only useful as a
+        stand-in for the real API if the same input produces the same shape of answer.
+        """
+        out: dict[str, set[Cloud]] = {}
+        for ident in self.identities.values():
+            for g in ident.grants:
+                if (
+                    g.active
+                    and g.effect == "allow"
+                    and g.verb in PRIVILEGE_VERBS
+                    and g.scope_level in PRIVILEGED_SCOPES
+                ):
+                    out.setdefault(ident.identity_id, set()).add(g.cloud)
+        return out
+
+    def _governance(self) -> GovernanceMetrics:
+        privileged = self._privileged_clouds()
+        humans = [i for i in self.identities.values() if i.identity_type == "human"]
+        priv_humans = [i for i in humans if i.identity_id in privileged]
+        without_mfa = sum(1 for i in priv_humans if not i.mfa_enforced)
+        radii = sorted((i.score.blast_radius if i.score else 0.0) for i in self.identities.values())
+        total_radius = sum(radii)
+        top_n = max(1, round(len(radii) * 0.05)) if radii else 0
+        concentration = (
+            100.0 * sum(sorted(radii, reverse=True)[:top_n]) / total_radius if total_radius else 0.0
+        )
+        p90_rank = max(1, min(len(radii), math.ceil(0.9 * len(radii)))) if radii else 0
+        return GovernanceMetrics(
+            privileged_identities=len(privileged),
+            privileged_pct=(
+                round(100.0 * len(privileged) / len(self.identities), 1) if self.identities else 0.0
+            ),
+            privileged_without_mfa=without_mfa,
+            mfa_coverage_pct=(
+                round(100.0 * (len(priv_humans) - without_mfa) / len(priv_humans), 1) if priv_humans else 0.0
+            ),
+            cross_cloud_privileged=sum(1 for c in privileged.values() if len(c) >= 2),
+            blast_radius_p90_pct=round(radii[p90_rank - 1] * 100, 1) if radii else 0.0,
+            blast_radius_max_pct=round(max(radii) * 100, 1) if radii else 0.0,
+            risk_concentration_pct=round(concentration, 1),
+            dormant_privileged=sum(1 for i in priv_humans if i.employment_status != "active"),
+            external_privileged=sum(1 for i in priv_humans if i.external),
+            escalation_paths=sum(1 for i in self.identities.values() if i.score and i.score.escalation_paths),
+            privileged_grants=sum(
+                1
+                for i in self.identities.values()
+                for g in i.grants
+                if g.active
+                and g.effect == "allow"
+                and g.verb in PRIVILEGE_VERBS
+                and g.scope_level in PRIVILEGED_SCOPES
+            ),
+        )
+
+    def _cloud_posture(self) -> list[CloudPosture]:
+        privileged = self._privileged_clouds()
+        findings_by_cloud: dict[Cloud, dict[str, int]] = {
+            c: {"total": 0, "Critical": 0, "High": 0} for c in CLOUDS
+        }
+        for f in self.findings.values():
+            for c in f.clouds:
+                bucket = findings_by_cloud[c]
+                bucket["total"] += 1
+                if f.severity in bucket:
+                    bucket[f.severity] += 1
+
+        rows: list[CloudPosture] = []
+        for cloud in CLOUDS:
+            here = [i for i in self.identities.values() if cloud in i.clouds]
+            grants = [g for i in here for g in i.grants if g.cloud == cloud and g.active]
+            priv_here = [i for i in here if cloud in privileged.get(i.identity_id, set())]
+            last_month = max((g.snapshot_month for g in grants), default=None)
+            counts = findings_by_cloud[cloud]
+            if not grants:
+                status = "absent"
+            elif last_month is not None and last_month < self.month:
+                status = "stale"
+            else:
+                status = "current"
+            rows.append(
+                CloudPosture(
+                    cloud=cloud,
+                    status=cast(Any, status),
+                    identities=len(here),
+                    principals=sum(1 for i in here for p in i.principals if p.cloud == cloud),
+                    grants=len(grants),
+                    findings=counts["total"],
+                    critical=counts["Critical"],
+                    high=counts["High"],
+                    privileged=len(priv_here),
+                    privileged_without_mfa=sum(
+                        1 for i in priv_here if i.identity_type == "human" and not i.mfa_enforced
+                    ),
+                    privileged_grants=sum(
+                        1 for g in grants if g.verb in PRIVILEGE_VERBS and g.scope_level in PRIVILEGED_SCOPES
+                    ),
+                    last_grant_month=last_month,
+                    last_grant_month_label=month_label(last_month) if last_month else None,
+                )
+            )
+        return rows
+
     def estate_summary(self) -> EstateSummary:
         scores = sorted(i.score.score if i.score else 0 for i in self.identities.values())
         mid = len(scores) // 2
@@ -1491,6 +1612,8 @@ class MockRepo:
             findings_by_cloud=by_cloud,
             findings_by_department=self._rollups(),
             median_score=median,
+            governance=self._governance(),
+            clouds=self._cloud_posture(),
             ledger=self._ledger_badge(),
             executive_summary=self._summary_text(cached=True).summary_paragraph,
             model_id=None,

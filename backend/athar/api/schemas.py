@@ -164,6 +164,62 @@ class LedgerBadge(BaseModel):
     chain_id: int | None = None
 
 
+class CloudPosture(BaseModel):
+    """Per-provider posture for the multi-cloud panel (SPEC §14 Overview).
+
+    One row per cloud ATHAR has actually ingested, so the panel reports on the estate in front of
+    it rather than asserting three green ticks. `status` is derived, never configured: a cloud
+    with no principals this month is `absent`, one whose newest grant predates the current
+    snapshot is `stale`, otherwise `current`.
+    """
+
+    cloud: Cloud
+    status: Literal["current", "stale", "absent"]
+    identities: int = Field(description="Identities holding at least one active grant here")
+    principals: int
+    grants: int
+    findings: int
+    critical: int
+    high: int
+    privileged: int = Field(description="Identities holding control-plane privilege in this cloud")
+    privileged_without_mfa: int
+    privileged_grants: int = Field(
+        description="Control-plane grants (admin/grant/impersonate) at project scope or above"
+    )
+    last_grant_month: int | None = None
+    last_grant_month_label: str | None = None
+
+
+class GovernanceMetrics(BaseModel):
+    """The numbers a governance team is actually asked for in a board or audit pack.
+
+    Deliberately not accuracy metrics: precision/recall on the synthetic estate is a
+    pipeline-recovery check (see Evaluation), so putting a 1.00 on the landing page would be
+    the least informative number available. These describe the *estate's* posture instead —
+    concentration of privilege, MFA coverage where it matters, and how far the worst identity
+    can reach — each of which moves when the estate changes and none of which self-grade.
+    """
+
+    privileged_identities: int = Field(
+        description="Hold admin/grant/impersonate at project scope or above, in one or more clouds"
+    )
+    privileged_pct: float
+    privileged_without_mfa: int = Field(description="Privileged humans with no MFA enforced")
+    mfa_coverage_pct: float = Field(description="Share of privileged humans with MFA enforced")
+    cross_cloud_privileged: int = Field(description="Privileged in two or more clouds")
+    blast_radius_p90_pct: float = Field(description="90th-percentile percent of estate reachable")
+    blast_radius_max_pct: float
+    risk_concentration_pct: float = Field(
+        description="Share of total measured blast radius held by the top 5% of identities"
+    )
+    dormant_privileged: int = Field(description="Privileged and departed, or on a closed contract")
+    external_privileged: int = Field(description="Privileged and flagged external/contractor")
+    escalation_paths: int = Field(description="Identities with at least one escalation path found")
+    privileged_grants: int = Field(
+        description="Control-plane grants (admin/grant/impersonate) at project scope or above"
+    )
+
+
 class EstateSummary(BaseModel):
     current_month: int
     current_month_label: str = Field(examples=["August 2026"])
@@ -175,6 +231,8 @@ class EstateSummary(BaseModel):
     findings_by_cloud: dict[Cloud, int]
     findings_by_department: list[DepartmentRollup]
     median_score: float
+    governance: GovernanceMetrics
+    clouds: list[CloudPosture]
     ledger: LedgerBadge
     executive_summary: str | None = None
     model_id: str | None = None
@@ -648,6 +706,11 @@ class RuleEval(BaseModel):
     fn: int
     precision: float | None = None
     recall: float | None = None
+    support: int = Field(0, description="Ground-truth positives for this rule (tp + fn)")
+    exercised: bool = Field(False, description="The estate produced at least one positive here")
+    underpowered: bool = Field(
+        False, description="Exercised, but on too few positives for the ratio to mean much"
+    )
 
 
 class DecoyEval(BaseModel):
@@ -671,10 +734,21 @@ class EvalOut(BaseModel):
     precision: float
     recall: float
     f1: float
+    #: 95% Wilson score intervals, as [low, high]. A perfect point estimate on a few dozen
+    #: samples is a different claim from a perfect one on thousands; the interval is what stops
+    #: "100%" being read as the stronger of the two.
+    precision_ci: list[float] = Field(default_factory=lambda: [0.0, 0.0], min_length=2, max_length=2)
+    recall_ci: list[float] = Field(default_factory=lambda: [0.0, 0.0], min_length=2, max_length=2)
     threshold: Literal["High+"] = "High+"
     tp: int
     fp: int
     fn: int
+    #: Evaluation coverage: how much of the ruleset these numbers actually speak for.
+    rules_total: int = 0
+    rules_exercised: int = 0
+    rules_underpowered: list[str] = Field(default_factory=list)
+    rules_unexercised: list[str] = Field(default_factory=list)
+    min_support: int = Field(10, description="Positives a rule needs before its ratio is reportable")
     per_rule: list[RuleEval]
     decoys: list[DecoyEval]
     director_sentence: str

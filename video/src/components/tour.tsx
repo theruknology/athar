@@ -9,6 +9,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import REGIONS from "../regions.json";
 import { C, MONO, SANS } from "../theme";
 
 /* ============================================================ easing */
@@ -121,41 +122,130 @@ const Sweep: React.FC<{ at: number; len?: number }> = ({ at, len = 44 }) => {
 };
 
 /* ============================================================ screen (3D) */
+
+/**
+ * Named regions measured from the live DOM by `scripts/capture_shots.mjs`.
+ *
+ * The film used to carry hand-measured percentages for every highlight, which went stale the
+ * moment a panel moved and put the box over the wrong thing. Now the capture writes real
+ * `getBoundingClientRect()` boxes and the composition looks them up by name, so a layout change
+ * re-measures itself on the next capture instead of silently mis-highlighting.
+ */
+type Box = { x: number; y: number; w: number; h: number };
+type PageRegions = { page: { w: number; h: number } } & Record<string, Box | { w: number; h: number }>;
+
+export type ShotName = keyof typeof REGIONS;
+
+export function region(shot: string, name: string): Box | null {
+  const page = (REGIONS as Record<string, PageRegions>)[shot];
+  const box = page?.[name];
+  if (!box || !("x" in box)) return null;
+  return box as Box;
+}
+
+function pageAspect(shot: string): number {
+  const page = (REGIONS as Record<string, PageRegions>)[shot]?.page;
+  return page ? page.w / page.h : 1.6;
+}
+
+/** The browser window the shot is composited into. */
+const FRAME_W = 1720;
+const CHROME_H = 38;
+const VIEW_H = 908;
+
 export type Focus = { x: number; y: number; z: number };
 
+/**
+ * Camera that frames a named region.
+ *
+ * `fill` is how much of the window the region should occupy, so a wide panel and a small tile
+ * both land at a sensible size without anyone tuning a zoom by hand.
+ */
+function cameraFor(shot: string, name: string, fill: number, maxZoom: number): Focus | null {
+  const r = region(shot, name);
+  if (!r) return null;
+  const aspect = pageAspect(shot);
+  const imgH = FRAME_W / aspect; // rendered height of the full-page image
+  // Zoom needed to make the region fill `fill` of the window, whichever axis binds first.
+  const zx = (100 / r.w) * fill;
+  const zy = (((VIEW_H / imgH) * 100) / r.h) * fill;
+  // Capped, because a small tile would otherwise compute a 4–7× zoom and fill the screen with
+  // two words. The spotlight is what says "look here"; the camera only has to get close enough
+  // that the surrounding panel is still legible as context.
+  return { x: r.x, y: r.y, z: Math.max(1, Math.min(zx, zy, maxZoom)) };
+}
+
 export const Screen: React.FC<{
-  src: string;
-  from: Focus;
-  to: Focus;
+  /** Shot name; also the PNG under `public/shots/<shot>.png`. */
+  shot: string;
+  /** Region to open on. Omit to open on the whole page. */
+  from?: Focus | string;
+  /** Region to settle on. Omit to hold `from`. */
+  to?: Focus | string;
+  /** How much of the window a named region should fill (0–1). */
+  fill?: number;
+  /** Upper bound on the computed zoom; context matters more than size. */
+  maxZoom?: number;
   move?: [number, number];
-  ring?: { at: number; w: number; h: number };
-  /** how far it rises from below on entry */
+  /** Dim everything but this region, from this frame. */
+  spot?: { region: string; at: number; out?: number };
   rise?: number;
-  /** entry tilt in degrees */
   tilt?: number;
-  /** specular sweep start */
   sweep?: number;
   children?: React.ReactNode;
-}> = ({ src, from, to, move, ring, rise = 300, tilt = 15, sweep, children }) => {
+}> = ({
+  shot,
+  from,
+  to,
+  fill = 0.82,
+  maxZoom = 1.75,
+  move,
+  spot,
+  rise = 300,
+  tilt = 15,
+  sweep,
+  children,
+}) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
-  const [a, b] = move ?? [0, durationInFrames];
-  const t = ease(frame, a, b);
-  const z = interpolate(t, [0, 1], [from.z, to.z]);
-  const ox = interpolate(t, [0, 1], [from.x, to.x]);
-  const oy = interpolate(t, [0, 1], [from.y, to.y]);
 
-  // entrance: rises from below with a tilt that settles — the promo move
+  const aspect = pageAspect(shot);
+  const imgH = FRAME_W / aspect;
+  /** An image-space y% maps into window-space by this factor. Derived, never hardcoded. */
+  const yMap = imgH / VIEW_H;
+
+  const resolve = (f: Focus | string | undefined, fallback: Focus): Focus =>
+    typeof f === "string" ? (cameraFor(shot, f, fill, maxZoom) ?? fallback) : (f ?? fallback);
+
+  const wide: Focus = { x: 50, y: 50 / yMap, z: 1 };
+  const a0 = resolve(from, wide);
+  const b0 = resolve(to, a0);
+
+  const [ma, mb] = move ?? [0, durationInFrames];
+  const t = ease(frame, ma, mb);
+  const z = interpolate(t, [0, 1], [a0.z, b0.z]);
+  const ox = interpolate(t, [0, 1], [a0.x, b0.x]);
+  const oy = interpolate(t, [0, 1], [a0.y, b0.y]);
+
   const ent = ease(frame, 0, 38);
   const ty = interpolate(ent, [0, 1], [rise, 0]);
   const sc = interpolate(ent, [0, 1], [0.93, 1]);
-  // slow parallax drift so the frame is never dead still
   const rx = interpolate(ent, [0, 1], [tilt, 0]) + Math.sin(frame / 105) * 0.7;
   const ry = Math.sin(frame / 135 + 1.2) * 1.5;
+  const breathe = 0.5 + 0.5 * Math.sin(frame / 70);
 
   return (
     <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", perspective: 2300 }}>
-      {/* floor glow the screen appears to sit on */}
+      <div
+        style={{
+          position: "absolute",
+          width: 2000,
+          height: 1200,
+          background: "radial-gradient(ellipse at center, rgba(39,198,223,.10), transparent 62%)",
+          filter: `blur(${60 + breathe * 14}px)`,
+          opacity: ent * (0.55 + breathe * 0.25),
+        }}
+      />
       <div
         style={{
           position: "absolute",
@@ -172,24 +262,34 @@ export const Screen: React.FC<{
           transform: `translateY(${ty}px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${sc})`,
           transformStyle: "preserve-3d",
           opacity: ent,
+          position: "relative",
         }}
       >
         <div
           style={{
-            width: 1720,
-            height: 946,
+            position: "absolute",
+            inset: -2,
+            borderRadius: 26,
+            boxShadow: `0 0 0 1px rgba(39,198,223,${0.18 + breathe * 0.1}), 0 0 46px rgba(39,198,223,${0.14 + breathe * 0.1})`,
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            width: FRAME_W,
+            height: VIEW_H + CHROME_H,
             borderRadius: 24,
             overflow: "hidden",
             border: `1px solid ${C.border2}`,
             background: "#0a0f14",
             boxShadow:
-              "0 60px 150px rgba(0,0,0,.66), 0 0 0 1px rgba(255,255,255,.04), inset 0 1px 0 rgba(255,255,255,.10)",
+              "0 70px 170px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04), inset 0 1px 0 rgba(255,255,255,.10)",
             position: "relative",
           }}
         >
           <div
             style={{
-              height: 38,
+              height: CHROME_H,
               background: "#0f1720",
               borderBottom: `1px solid ${C.border}`,
               display: "flex",
@@ -205,9 +305,9 @@ export const Screen: React.FC<{
               athar.gov · access governance
             </span>
           </div>
-          <div style={{ position: "relative", height: 908, overflow: "hidden" }}>
+          <div style={{ position: "relative", height: VIEW_H, overflow: "hidden" }}>
             <Img
-              src={staticFile(src)}
+              src={staticFile(`shots/${shot}.png`)}
               style={{
                 width: "100%",
                 display: "block",
@@ -215,11 +315,18 @@ export const Screen: React.FC<{
                 transformOrigin: `${ox}% ${oy}%`,
               }}
             />
-            {ring && <Ring at={ring.at} x={ox} y={oy} w={ring.w} h={ring.h} z={z} />}
+            {spot && (
+              <Spotlight
+                box={region(shot, spot.region)}
+                anchor={{ x: ox, y: oy }}
+                z={z}
+                yMap={yMap}
+                at={spot.at}
+                out={spot.out}
+              />
+            )}
           </div>
-          <AbsoluteFill
-            style={{ pointerEvents: "none", boxShadow: "inset 0 0 170px 44px rgba(6,10,14,.34)" }}
-          />
+          <AbsoluteFill style={{ pointerEvents: "none", boxShadow: "inset 0 0 170px 44px rgba(6,10,14,.34)" }} />
           {sweep !== undefined && <Sweep at={sweep} />}
         </div>
       </div>
@@ -228,34 +335,55 @@ export const Screen: React.FC<{
   );
 };
 
-/** The image is taller than its window, so an image-space y maps down by this factor. */
-const Y_MAP = 1075 / 908;
-
-const Ring: React.FC<{ at: number; x: number; y: number; w: number; h: number; z: number }> = ({
-  at,
-  x,
-  y,
-  w,
-  h,
-  z,
-}) => {
+/**
+ * Spotlight: dim the page, leave one region lit, ring it in brand light.
+ *
+ * This replaces an outlined rectangle that sat on top of the UI and read as a screenshot
+ * annotation. Dimming everything else is how a viewer's eye is actually directed — the lit
+ * region needs no border to be the only thing you look at, and the glow reads as the product's
+ * own focus state rather than a marker drawn over it.
+ */
+const Spotlight: React.FC<{
+  box: Box | null;
+  anchor: { x: number; y: number };
+  z: number;
+  yMap: number;
+  at: number;
+  out?: number;
+}> = ({ box, anchor, z, yMap, at, out }) => {
   const frame = useCurrentFrame();
-  const p = spring({ frame: frame - at, fps: 30, config: { damping: 200, mass: 0.6 }, durationInFrames: 22 });
-  const pulse = 1 + Math.sin(Math.max(0, frame - at) / 11) * 0.012;
-  if (p <= 0) return null;
+  const { durationInFrames } = useVideoConfig();
+  if (!box) return null;
+
+  const end = out ?? durationInFrames;
+  const p = ease(frame, at, at + 20) * (1 - ease(frame, end - 12, end));
+  if (p <= 0.001) return null;
+
+  // Project an image-space box into window space: the image is scaled by `z` about `anchor`,
+  // so a point's offset from the anchor scales with it.
+  const left = 50 + (box.x - anchor.x) * z;
+  const top = (anchor.y + (box.y - anchor.y) * z) * yMap;
+  const w = box.w * z;
+  const h = box.h * yMap * z;
+  const pad = 0.8;
+  const breathe = 1 + Math.sin(Math.max(0, frame - at) / 13) * 0.006;
+
   return (
     <div
       style={{
         position: "absolute",
-        left: `${x}%`,
-        top: `${y * Y_MAP}%`,
-        width: `${w * z}%`,
-        height: `${h * Y_MAP * z}%`,
-        transform: `translate(-50%,-50%) scale(${interpolate(p, [0, 1], [1.25, 1]) * pulse})`,
-        border: `2px solid ${C.cyan}`,
-        borderRadius: 12,
-        boxShadow: `0 0 0 1px rgba(39,198,223,.22), 0 0 38px rgba(39,198,223,${0.45 * p}), inset 0 0 22px rgba(39,198,223,.10)`,
-        opacity: p,
+        left: `${left}%`,
+        top: `${top}%`,
+        width: `${w + pad * 2}%`,
+        height: `${h + pad * 2}%`,
+        transform: `translate(-50%,-50%) scale(${interpolate(p, [0, 1], [1.04, 1]) * breathe})`,
+        borderRadius: 14,
+        // The dim is the highlight: one huge spread shadow darkens everything outside the box.
+        boxShadow: `0 0 0 9999px rgba(5,9,13,${0.68 * p}),
+                    0 0 0 1px rgba(39,198,223,${0.5 * p}),
+                    0 0 60px rgba(39,198,223,${0.45 * p}),
+                    inset 0 0 40px rgba(39,198,223,${0.10 * p})`,
+        pointerEvents: "none",
       }}
     />
   );
@@ -339,6 +467,23 @@ export const Caption: React.FC<{
           ? { left: 108, top: 84 }
           : { right: 108, top: 84 };
 
+  const bracket = ease(frame, at, at + 12);
+  const scan = ease(frame, at + 4, at + 22);
+  const blink = Math.floor(frame / 15) % 2 === 0;
+  const corner = (cx: "l" | "r", cy: "t" | "b"): React.CSSProperties => ({
+    position: "absolute",
+    width: 13,
+    height: 13,
+    [cy === "t" ? "top" : "bottom"]: -13,
+    [cx === "l" ? "left" : "right"]: -18,
+    borderTop: cy === "t" ? `1.5px solid ${C.cyan}` : "none",
+    borderBottom: cy === "b" ? `1.5px solid ${C.cyan}` : "none",
+    borderLeft: cx === "l" ? `1.5px solid ${C.cyan}` : "none",
+    borderRight: cx === "r" ? `1.5px solid ${C.cyan}` : "none",
+    opacity: bracket * 0.85,
+    transform: `scale(${interpolate(bracket, [0, 1], [0.5, 1])})`,
+  });
+
   return (
     <div
       style={{
@@ -348,31 +493,51 @@ export const Caption: React.FC<{
         transform: `translateY(${(1 - inP) * 22 + outP * -14}px)`,
         maxWidth: 980,
         zIndex: 20,
+        padding: "14px 22px",
       }}
     >
-      <div
-        style={{
-          background: "rgba(9,14,19,.72)",
-          border: `1px solid rgba(47,68,84,.9)`,
-          borderLeft: `3px solid ${C.cyan}`,
-          borderRadius: 14,
-          padding: kicker ? "16px 28px 18px" : "16px 28px",
-          backdropFilter: "blur(14px)",
-          boxShadow: "0 22px 60px rgba(0,0,0,.5)",
-        }}
-      >
+      <div style={{ position: "relative" }}>
+        <div style={corner("l", "t")} />
+        <div style={corner("r", "t")} />
+        <div style={corner("l", "b")} />
+        <div style={corner("r", "b")} />
+        {/* faint scrim so text sits legibly on any screenshot, no card edge */}
+        <div
+          style={{
+            position: "absolute",
+            inset: "-10px -18px",
+            background: "linear-gradient(180deg, rgba(6,10,14,.02), rgba(6,10,14,.5) 42%, rgba(6,10,14,.62))",
+            filter: "blur(2px)",
+            zIndex: -1,
+            borderRadius: 4,
+          }}
+        />
         {kicker && (
-          <div
-            style={{
-              font: `500 14px/1 ${MONO}`,
-              letterSpacing: "0.26em",
-              textTransform: "uppercase",
-              color: C.cyan,
-              marginBottom: 12,
-              opacity: ease(frame, at, at + 10),
-            }}
-          >
-            {kicker}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 13 }}>
+            <span
+              style={{
+                font: `500 14px/1 ${MONO}`,
+                letterSpacing: "0.28em",
+                textTransform: "uppercase",
+                color: C.cyan,
+                opacity: ease(frame, at, at + 10),
+                textShadow: `0 0 16px rgba(39,198,223,.6)`,
+              }}
+            >
+              {kicker}
+              <span style={{ opacity: blink ? 1 : 0 }}>_</span>
+            </span>
+            <span
+              style={{
+                display: "inline-block",
+                height: 1,
+                width: 46,
+                background: C.cyan,
+                transform: `scaleX(${scan})`,
+                transformOrigin: "left",
+                boxShadow: `0 0 8px rgba(39,198,223,.7)`,
+              }}
+            />
           </div>
         )}
         <Kinetic text={text} at={at + 3} size={size} weight={300} accent={accent} />
@@ -527,6 +692,214 @@ export const Cursor: React.FC<{
       >
         <path d="M4 2l6 16 2.5-6.5L19 9 4 2z" fill="#fff" stroke="#0a0f14" strokeWidth="1.2" />
       </svg>
+    </div>
+  );
+};
+
+/* ============================================================ multi-agent chat */
+
+/** Fast blur wipe used only to hop between agent skins — a deliberate cut, not the default. */
+export const Wipe: React.FC<{ at: number; len?: number }> = ({ at, len = 16 }) => {
+  const frame = useCurrentFrame();
+  const { width } = useVideoConfig();
+  const p = (frame - at) / len;
+  if (p <= 0 || p >= 1) return null;
+  const x = interpolate(p, [0, 1], [-20, 120]);
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none", zIndex: 50, overflow: "hidden" }}>
+      <div
+        style={{
+          position: "absolute",
+          left: `${x}%`,
+          top: 0,
+          bottom: 0,
+          width: width * 0.5,
+          transform: "translateX(-50%) skewX(-9deg)",
+          background:
+            "linear-gradient(90deg,transparent,rgba(39,198,223,.05) 30%,rgba(255,255,255,.9) 50%,rgba(39,198,223,.05) 70%,transparent)",
+          filter: "blur(18px)",
+          mixBlendMode: "screen",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: `${x}%`,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          transform: "translateX(-50%)",
+          background: "rgba(255,255,255,.95)",
+          boxShadow: "0 0 60px 14px rgba(39,198,223,.8)",
+          opacity: bumpP(p),
+        }}
+      />
+    </AbsoluteFill>
+  );
+};
+const bumpP = (p: number) => Math.sin(Math.min(1, Math.max(0, p)) * Math.PI);
+
+export type ChatLine = { text: string; at: number };
+
+/** One agent's chat window: types a prompt, calls the MCP tool, streams a reply. */
+export const ChatSkin: React.FC<{
+  name: string;
+  tag: string;
+  glyphColor: string;
+  bornAt: number;
+  outAt?: number;
+  userText: string;
+  typeAt: number;
+  typeLen?: number;
+  toolAt: number;
+  toolLabel: string;
+  toolDenied?: boolean;
+  replyAt: number;
+  replyLines: ChatLine[];
+}> = ({
+  name,
+  tag,
+  glyphColor,
+  bornAt,
+  outAt,
+  userText,
+  typeAt,
+  typeLen = 26,
+  toolAt,
+  toolLabel,
+  toolDenied,
+  replyAt,
+  replyLines,
+}) => {
+  const frame = useCurrentFrame();
+  const born = ease(frame, bornAt, bornAt + 14);
+  const gone = outAt !== undefined ? ease(frame, outAt, outAt + 10) : 0;
+  const chars = Math.round(ease(frame, typeAt, typeAt + typeLen, 0, userText.length));
+  const typed = userText.slice(0, chars);
+  const caretOn = frame < typeAt + typeLen && Math.floor(frame / 8) % 2 === 0;
+  const toolP = ease(frame, toolAt, toolAt + 12);
+  const breathe = 0.5 + 0.5 * Math.sin(frame / 55);
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        opacity: born * (1 - gone),
+        transform: `translateY(${(1 - born) * 26 + gone * -14}px) scale(${interpolate(born, [0, 1], [0.97, 1])})`,
+      }}
+    >
+      {/* agent-tinted ambient glow, breathes so the card never sits dead-still */}
+      <div
+        style={{
+          position: "absolute",
+          inset: -80,
+          background: `radial-gradient(ellipse at center, ${glyphColor}22, transparent 65%)`,
+          filter: `blur(${50 + breathe * 12}px)`,
+          zIndex: -1,
+        }}
+      />
+      <div
+        style={{
+          width: 1180,
+          borderRadius: 20,
+          overflow: "hidden",
+          border: `1px solid ${C.border2}`,
+          background: "#0a0f14",
+          boxShadow: `0 50px 130px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03), 0 0 ${
+            50 + breathe * 20
+          }px ${glyphColor}22, inset 0 1px 0 rgba(255,255,255,.07)`,
+        }}
+      >
+      <div
+        style={{
+          height: 52,
+          background: "#0f1720",
+          borderBottom: `1px solid ${C.border}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "0 22px",
+        }}
+      >
+        <div
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            background: `linear-gradient(135deg, ${glyphColor}, rgba(255,255,255,.15))`,
+            boxShadow: `0 0 16px ${glyphColor}55`,
+          }}
+        />
+        <span style={{ font: `500 18px/1 ${SANS}`, color: C.fg }}>{name}</span>
+        <span style={{ font: `400 14px/1 ${MONO}`, color: C.faint }}>{tag}</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 999, background: C.ok, boxShadow: `0 0 8px ${C.ok}` }} />
+          <span style={{ font: `400 13px/1 ${MONO}`, color: C.faint }}>MCP connected</span>
+        </div>
+      </div>
+
+      <div style={{ padding: "30px 34px 36px", minHeight: 300, display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* user bubble, typed live */}
+        <div style={{ alignSelf: "flex-end", maxWidth: "78%" }}>
+          <div
+            style={{
+              background: "rgba(39,198,223,.14)",
+              border: "1px solid rgba(39,198,223,.3)",
+              borderRadius: "16px 16px 4px 16px",
+              padding: "14px 20px",
+              font: `400 22px/1.5 ${SANS}`,
+              color: C.fg,
+            }}
+          >
+            {typed}
+            <span style={{ opacity: caretOn ? 1 : 0 }}>▌</span>
+          </div>
+        </div>
+
+        {/* tool-call pill */}
+        {toolP > 0 && (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              opacity: toolP,
+              transform: `translateX(${(1 - toolP) * -10}px)`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              background: "rgba(255,255,255,.03)",
+              border: `1px solid ${toolDenied ? "rgba(255,106,94,.4)" : "rgba(39,198,223,.28)"}`,
+              borderRadius: 10,
+              padding: "9px 16px",
+              font: `500 16px/1 ${MONO}`,
+              color: toolDenied ? C.crit : C.cyan,
+            }}
+          >
+            <span style={{ opacity: 0.7 }}>{toolDenied ? "✕" : "⚙"}</span> {toolLabel}
+          </div>
+        )}
+
+        {/* assistant reply, line by line */}
+        <div style={{ alignSelf: "flex-start", maxWidth: "86%", display: "flex", flexDirection: "column", gap: 8 }}>
+          {replyLines.map((l, i) => {
+            const p = ease(frame, replyAt + l.at, replyAt + l.at + 10);
+            if (p <= 0) return null;
+            return (
+              <div
+                key={i}
+                style={{
+                  opacity: p,
+                  transform: `translateY(${(1 - p) * 8}px)`,
+                  font: `400 21px/1.55 ${SANS}`,
+                  color: l.text.startsWith("✕") ? C.crit : C.muted,
+                }}
+              >
+                {l.text}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      </div>
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { getEval } from "../api/endpoints";
 import { queryKeys } from "../api/queryKeys";
 import type { EvalOut } from "../api/types";
 import { DecoyTable } from "../components/evaluation/DecoyTable";
+import { EvidenceStrength } from "../components/evaluation/EvidenceStrength";
 import { RegisterCards } from "../components/evaluation/RegisterCards";
 import { RuleConfusionTable } from "../components/evaluation/RuleConfusionTable";
 import { Badge } from "../components/ui/Badge";
@@ -103,16 +104,22 @@ export function EvaluationPage() {
             <StatTile
               label="Precision"
               value={formatRatioPct(result.precision)}
-              hint={`${formatInt(result.tp)} of ${formatInt(result.tp + result.fp)} flagged are genuine`}
+              hint={`${formatInt(result.tp)} of ${formatInt(result.tp + result.fp)} flagged are genuine · 95% CI ${formatRatioPct((result.precision_ci ?? [0, 0])[0])}–${formatRatioPct((result.precision_ci ?? [0, 0])[1])}`}
               to="/findings?severity=High"
             />
             <StatTile
               label="Recall"
               value={formatRatioPct(result.recall)}
-              hint={`${formatInt(result.fn)} ground-truth positives missed`}
+              hint={`${formatInt(result.fn)} of ${formatInt(result.tp + result.fn)} ground-truth positives missed · 95% CI ${formatRatioPct((result.recall_ci ?? [0, 0])[0])}–${formatRatioPct((result.recall_ci ?? [0, 0])[1])}`}
               to="/findings?severity=Critical"
             />
-            <StatTile label="F1" value={formatRatioPct(result.f1)} hint="Harmonic mean at High+" to="/findings" />
+            <StatTile
+              label="Rules exercised"
+              value={`${result.rules_exercised} / ${result.rules_total}`}
+              hint={`${(result.rules_underpowered ?? []).length} measured on fewer than ${result.min_support ?? 10} positives`}
+              tone={(result.rules_unexercised ?? []).length > 0 ? "warn" : "ok"}
+              to="/findings"
+            />
             <StatTile
               label="Decoys handled"
               value={`${formatInt(result.decoys.filter((d) => d.correctly_handled).length)} / ${formatInt(result.decoys.length)}`}
@@ -120,6 +127,8 @@ export function EvaluationPage() {
               onClick={() => document.getElementById("decoys")?.scrollIntoView?.({ behavior: "smooth" })}
             />
           </div>
+
+          <EvidenceStrength result={result} />
 
           <RegisterCards result={result} />
 

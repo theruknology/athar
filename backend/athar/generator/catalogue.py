@@ -272,12 +272,17 @@ AWS_MANAGED_POLICY_DOCUMENTS: dict[str, list[dict[str, Any]]] = {
             "Resource": "*",
         }
     ],
+    # `nahartelemetry:*` is the AWS R0 bait (SPEC §5.3). It is a deliberately fictional vendor
+    # namespace, not a real AWS service: the mapping tables now cover the entire published AWS
+    # surface (see scripts/build_service_catalog.py), so a real service name would be mapped and
+    # the bait would stop baiting. R0's job is "an action no catalogue can know" — a third-party
+    # integration nobody has mapped yet — which only a made-up namespace can model honestly.
     "NdaBillingReadOnly": [
         {
             "Effect": "Allow",
             "Action": [
                 "ce:GetCostAndUsage", "ce:GetCostForecast", "ce:GetDimensionValues", "budgets:ViewBudget",
-                "aws-portal:ViewBilling", "wellarchitected:ListWorkloads", "wellarchitected:GetWorkload",
+                "aws-portal:ViewBilling", "nahartelemetry:ListWorkloads", "nahartelemetry:GetWorkload",
             ],
             "Resource": "*",
         }
@@ -369,7 +374,9 @@ AZURE_ROLE_DEFINITIONS: dict[str, AzureRoleDefinition] = {
         AzureRoleDefinition(
             "CustomBillingReader", "",  # GUID assigned from the seeded RNG at write time
             "NDA custom role: read cost exports and billing account scopes for the finance close.",
-            ("Microsoft.Billing/billingAccounts/read", "Microsoft.Consumption/*/read", "Microsoft.CostManagement/exports/read", "Microsoft.Advisor/recommendations/read"),
+            # `Nahar.Telemetry/*` is the Azure R0 bait — a fictional resource provider, for the
+            # same reason as `nahartelemetry:*` on AWS: every real provider namespace is mapped.
+            ("Microsoft.Billing/billingAccounts/read", "Microsoft.Consumption/*/read", "Microsoft.CostManagement/exports/read", "Nahar.Telemetry/recommendations/read"),
             custom=True,
         ),
         AzureRoleDefinition(

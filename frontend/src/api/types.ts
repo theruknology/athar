@@ -32,6 +32,8 @@ export type Altitude = keyof Schemas["AltitudesOut"];
 
 // Overview
 export type EstateSummary = Schemas["EstateSummary"];
+export type GovernanceMetrics = Schemas["GovernanceMetrics"];
+export type CloudPosture = Schemas["CloudPosture"];
 export type DepartmentRollup = Schemas["DepartmentRollup"];
 export type LedgerBadge = Schemas["LedgerBadge"];
 

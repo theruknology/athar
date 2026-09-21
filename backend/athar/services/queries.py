@@ -12,13 +12,14 @@ the rows as they stand now, so an edit to a stored severity moves the root (SPEC
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from statistics import median
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from sqlalchemy import Row, case, func, nulls_last, or_, select
+from sqlalchemy import Row, and_, case, false, func, nulls_last, or_, select
 from sqlalchemy.orm import Session
 
 from athar.api.problem import InvalidInputError
@@ -28,6 +29,7 @@ from athar.api.schemas import (
     AltitudesOut,
     CausalStepOut,
     Cloud,
+    CloudPosture,
     CredentialOut,
     DecisionKind,
     DecisionLedgerStatus,
@@ -41,6 +43,7 @@ from athar.api.schemas import (
     ExceptionType,
     FindingOut,
     FindingStatus,
+    GovernanceMetrics,
     GrantOut,
     HalfLifeLabel,
     HalfLifeOut,
@@ -70,13 +73,14 @@ from athar.api.schemas import (
     TimelineOut,
     TimelinePoint,
 )
+from athar.api.schemas import Cloud as CloudLiteral
 from athar.api.schemas import EmploymentStatus as EmploymentStatusLiteral
 from athar.api.schemas import GeneratedBy as GeneratedByLiteral
 from athar.api.schemas import IdentityRow as IdentityRowOut
 from athar.clock import month_end, month_label
 from athar.db import models as m
 from athar.detection.registry import get_rule
-from athar.domain import CLOUDS, SEVERITIES, SEVERITY_RANK
+from athar.domain import CLOUDS, SCOPE_RANK, SEVERITIES, SEVERITY_RANK
 from athar.domain import EstateView as DomainEstate
 from athar.domain import EventRow as DomainEvent
 from athar.domain import GrantRow as DomainGrant
@@ -1557,6 +1561,236 @@ def cached_summary(session: Session, scan_id: int) -> SummaryOut | None:
     )
 
 
+# ---------------------------------------------------------------------------
+# governance metrics and multi-cloud posture
+# ---------------------------------------------------------------------------
+
+# "Privileged" throughout this module means: holds a **control-plane** verb at **project scope or
+# above**, in any cloud. It is a property of the grant, never of a job title or a cloud tag.
+#
+# Two deliberate narrowings, both learned from real data:
+#
+# 1. The verbs are `admin`, `grant`, `impersonate` — not the full CONTROL_VERBS set the scoring
+#    graph uses for reach. Those three are what let an identity change *who can do what*, or
+#    become someone else; `write`/`delete` are power over data, which the blast-radius score
+#    already prices in. Counting writes here would make "privileged" mean "has a job".
+#
+# 2. The floor is `project`, not `org`. Providers bind at different altitudes: AWS policies land
+#    at `global` (Resource "*"), Azure at `resource`/`project`/`org`, and GCP IAM almost entirely
+#    at `project`. An absolute `org+` floor therefore reported *zero* privileged identities in
+#    GCP on a real estate — a modelling error that reads as a clean bill of health. `project+`
+#    means "broader than a single resource" in every provider's own vocabulary.
+PRIVILEGE_VERBS: frozenset[str] = frozenset({"admin", "grant", "impersonate"})
+MIN_PRIVILEGE_SCOPE = "project"
+_PRIVILEGED_SCOPES: tuple[str, ...] = tuple(
+    level for level, rank in SCOPE_RANK.items() if rank >= SCOPE_RANK[MIN_PRIVILEGE_SCOPE]
+)
+
+
+def _privileged_grant_where() -> list[Any]:
+    return [
+        m.Grant.active.is_(True),
+        m.Grant.effect == "allow",
+        m.Grant.verb.in_(sorted(PRIVILEGE_VERBS)),
+        m.Grant.scope_level.in_(_PRIVILEGED_SCOPES),
+    ]
+
+
+def _privileged_identities(session: Session, month: int) -> dict[str, set[str]]:
+    """identity_id → clouds where it holds control-plane privilege. Empty when none."""
+    rows = session.execute(
+        select(m.Grant.identity_id, m.Grant.cloud)
+        .where(m.Grant.snapshot_month == month, *_privileged_grant_where())
+        .distinct()
+    ).all()
+    out: dict[str, set[str]] = {}
+    for identity_id, cloud in rows:
+        out.setdefault(str(identity_id), set()).add(str(cloud))
+    return out
+
+
+def _percentile(values: Sequence[float], pct: float) -> float:
+    """Nearest-rank percentile: ``ceil(P/100 * N)``.
+
+    Interpolation would invent a blast radius no identity actually has, which is the wrong trade
+    on a page that exists to name real accounts. ``ceil`` (not ``round``) because the textbook
+    definition is the smallest rank covering at least P% of the sample — and because Python's
+    banker's rounding would otherwise make p90 of a five-identity estate land on the 4th value.
+    """
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(1, min(len(ordered), math.ceil(pct / 100.0 * len(ordered))))
+    return float(ordered[rank - 1])
+
+
+def governance_metrics(session: Session, scan_id: int, month: int) -> GovernanceMetrics:
+    privileged = _privileged_identities(session, month)
+    privileged_ids = set(privileged)
+
+    total_identities = _count(session, m.Identity, m.Identity.first_seen_month <= month)
+
+    # MFA only means anything for humans: a service account cannot present a second factor, so
+    # folding them in would dilute the one number an auditor actually asks about.
+    human_rows = session.execute(
+        select(
+            m.Identity.identity_id, m.Identity.mfa_enforced, m.Identity.external, m.Identity.employment_status
+        ).where(m.Identity.first_seen_month <= month, m.Identity.identity_type == "human")
+    ).all()
+    priv_humans = [r for r in human_rows if str(r[0]) in privileged_ids]
+    priv_human_total = len(priv_humans)
+    without_mfa = sum(1 for r in priv_humans if not bool(r[1]))
+    external_priv = sum(1 for r in priv_humans if bool(r[2]))
+    dormant_priv = sum(1 for r in priv_humans if str(r[3]) != "active")
+
+    score_rows = session.execute(
+        select(
+            m.IdentityScore.identity_id, m.IdentityScore.blast_radius, m.IdentityScore.escalation_paths
+        ).where(m.IdentityScore.scan_id == scan_id)
+    ).all()
+    radii = [float(r[1]) for r in score_rows]
+    escalations = sum(1 for r in score_rows if r[2])
+
+    # Risk concentration: the share of all measured blast radius held by the worst 5% of
+    # identities. A governance team reads this as "how much of the problem is a handful of
+    # accounts" — the number that decides whether remediation is a project or an afternoon.
+    concentration = 0.0
+    if radii:
+        ordered = sorted(radii, reverse=True)
+        top_n = max(1, round(len(ordered) * 0.05))
+        total = sum(ordered)
+        if total > 0:
+            concentration = 100.0 * sum(ordered[:top_n]) / total
+
+    privileged_grants = _count(session, m.Grant, m.Grant.snapshot_month == month, *_privileged_grant_where())
+
+    return GovernanceMetrics(
+        privileged_identities=len(privileged_ids),
+        privileged_pct=round(100.0 * len(privileged_ids) / total_identities, 1) if total_identities else 0.0,
+        privileged_without_mfa=without_mfa,
+        mfa_coverage_pct=(
+            round(100.0 * (priv_human_total - without_mfa) / priv_human_total, 1) if priv_human_total else 0.0
+        ),
+        cross_cloud_privileged=sum(1 for clouds in privileged.values() if len(clouds) >= 2),
+        blast_radius_p90_pct=round(_percentile(radii, 90.0) * 100, 1),
+        blast_radius_max_pct=round(max(radii) * 100, 1) if radii else 0.0,
+        risk_concentration_pct=round(concentration, 1),
+        dormant_privileged=dormant_priv,
+        external_privileged=external_priv,
+        escalation_paths=escalations,
+        privileged_grants=privileged_grants,
+    )
+
+
+def cloud_posture(session: Session, scan_id: int, month: int) -> list[CloudPosture]:
+    """One row per cloud, including clouds with nothing in them (reported as `absent`)."""
+    privileged = _privileged_identities(session, month)
+
+    mfa = {
+        str(i): bool(f)
+        for i, f in session.execute(
+            select(m.Identity.identity_id, m.Identity.mfa_enforced).where(m.Identity.identity_type == "human")
+        ).all()
+    }
+
+    # Each cloud is reported at the newest month it actually has data for, not at the estate's
+    # snapshot month. Counting only `== month` would collapse "exported, but not since March"
+    # into "never exported", which are different problems: the first is a stale feed, the second
+    # is an unmonitored cloud. `last_grant_month` is what separates them.
+    latest: dict[str, int] = {
+        str(c): int(n)
+        for c, n in session.execute(
+            select(m.Grant.cloud, func.max(m.Grant.snapshot_month))
+            .where(m.Grant.snapshot_month <= month, m.Grant.active.is_(True))
+            .group_by(m.Grant.cloud)
+        ).all()
+        if n is not None
+    }
+    grant_stats: dict[str, tuple[int, int, int | None]] = {}
+    for cloud_key, newest in latest.items():
+        row = session.execute(
+            select(func.count(), func.count(func.distinct(m.Grant.identity_id))).where(
+                m.Grant.cloud == cloud_key,
+                m.Grant.snapshot_month == newest,
+                m.Grant.active.is_(True),
+            )
+        ).one()
+        grant_stats[cloud_key] = (int(row[0]), int(row[1]), newest)
+
+    principals: dict[str, int] = {
+        str(c): int(n)
+        for c, n in session.execute(select(m.Principal.cloud, func.count()).group_by(m.Principal.cloud)).all()
+    }
+
+    # Same rule as the grant counts: each cloud is priced at its own newest month.
+    privileged_grants: dict[str, int] = {
+        str(c): int(n)
+        for c, n in session.execute(
+            select(m.Grant.cloud, func.count())
+            .where(
+                or_(
+                    *[
+                        and_(m.Grant.cloud == cloud, m.Grant.snapshot_month == last)
+                        for cloud, last in latest.items()
+                    ]
+                )
+                if latest
+                else false(),
+                *_privileged_grant_where(),
+            )
+            .group_by(m.Grant.cloud)
+        ).all()
+    }
+
+    # Findings are attached to an identity, not a cloud, so a finding counts against every cloud
+    # the identity is present in — the same convention `findings_by_cloud` already uses.
+    finding_rows = session.execute(
+        select(m.Finding.identity_id, m.Finding.severity).where(m.Finding.scan_id == scan_id)
+    ).all()
+    ident_clouds = _clouds_by_identity(session, month, sorted({str(r[0]) for r in finding_rows}))
+    per_cloud_findings: dict[str, dict[str, int]] = {
+        c: {"total": 0, "Critical": 0, "High": 0} for c in CLOUDS
+    }
+    for identity_id, severity in finding_rows:
+        for found_in in ident_clouds.get(str(identity_id), []):
+            bucket = per_cloud_findings[found_in]
+            bucket["total"] += 1
+            if str(severity) in bucket:
+                bucket[str(severity)] += 1
+
+    out: list[CloudPosture] = []
+    for cloud in CLOUDS:
+        n_grants, n_identities, last_month = grant_stats.get(cloud, (0, 0, None))
+        priv_here = [i for i, clouds in privileged.items() if cloud in clouds]
+        findings = per_cloud_findings[cloud]
+        status: Literal["current", "stale", "absent"]
+        if n_grants == 0:
+            status = "absent"
+        elif last_month is not None and last_month < month:
+            status = "stale"
+        else:
+            status = "current"
+        out.append(
+            CloudPosture(
+                cloud=cast(CloudLiteral, cloud),
+                status=status,
+                identities=n_identities,
+                principals=int(principals.get(cloud, 0)),
+                grants=n_grants,
+                findings=findings["total"],
+                critical=findings["Critical"],
+                high=findings["High"],
+                privileged=len(priv_here),
+                # Only humans can carry MFA; a service account absent from `mfa` is not a gap.
+                privileged_without_mfa=sum(1 for i in priv_here if i in mfa and not mfa[i]),
+                privileged_grants=int(privileged_grants.get(cloud, 0)),
+                last_grant_month=last_month,
+                last_grant_month_label=month_label(last_month) if last_month else None,
+            )
+        )
+    return out
+
+
 def estate_summary(session: Session, ledger_enabled: bool) -> EstateSummary:
     scan = latest_scan(session)
     month = scan.snapshot_month if scan is not None else (current_month(session) or 0)
@@ -1605,6 +1839,8 @@ def estate_summary(session: Session, ledger_enabled: bool) -> EstateSummary:
         findings_by_cloud=by_cloud,
         findings_by_department=rollups,
         median_score=float(median(scores)) if scores else 0.0,
+        governance=governance_metrics(session, scan_id, month),
+        clouds=cloud_posture(session, scan_id, month),
         ledger=ledger_badge(session, ledger_enabled),
         executive_summary=summary.summary_paragraph if summary else None,
         model_id=summary.model_id if summary else None,

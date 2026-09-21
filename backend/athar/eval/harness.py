@@ -23,6 +23,7 @@ Low/Medium-only ones) so the stricter number is always visible in the result fil
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -72,6 +73,31 @@ class EvalError(RuntimeError):
     """The estate for this seed is neither on disk nor buildable."""
 
 
+#: A rule needs at least this many ground-truth positives before its precision/recall is worth
+#: reading as a measurement rather than an anecdote. Ten is not a statistical threshold — it is
+#: the point below which a single miss moves the number by ten percentage points or more, which
+#: is the honest reason to mark a rule "under-powered" on the Evaluation page rather than letting
+#: "100% on n=2" sit next to "100% on n=23" as though they carried the same weight.
+MIN_SUPPORT = 10
+
+
+def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a proportion.
+
+    Why this and not the textbook normal interval: at p = 1.0 the normal approximation gives a
+    width of exactly zero, so a perfect score on three samples would print as "100% ± 0%". The
+    Wilson interval stays honest at the boundary — 48/48 becomes [0.926, 1.0], which is the
+    difference between claiming perfection and reporting "we did not miss anything in 48 tries".
+    """
+    if trials <= 0:
+        return (0.0, 0.0)
+    p = successes / trials
+    denom = 1 + z**2 / trials
+    centre = (p + z**2 / (2 * trials)) / denom
+    margin = z * math.sqrt(p * (1 - p) / trials + z**2 / (4 * trials**2)) / denom
+    return (round(max(0.0, centre - margin), 4), round(min(1.0, centre + margin), 4))
+
+
 class RuleConfusion(BaseModel):
     rule_id: str
     tp: int = 0
@@ -79,6 +105,14 @@ class RuleConfusion(BaseModel):
     fn: int = 0
     precision: float | None = None
     recall: float | None = None
+    #: Ground-truth positives for this rule (tp + fn). The denominator behind `recall`, and the
+    #: number that decides whether this row is a measurement or a coincidence.
+    support: int = 0
+    #: True when the estate produced no ground-truth positive at all, so the rule is registered
+    #: and tested but this evaluation says nothing about it either way.
+    exercised: bool = False
+    #: True when exercised but `support` < MIN_SUPPORT.
+    underpowered: bool = False
 
 
 class DecoyOutcome(BaseModel):
@@ -106,6 +140,16 @@ class EvalResult(BaseModel):
     precision: float = 0.0
     recall: float = 0.0
     f1: float = 0.0
+    #: 95% Wilson intervals. A point estimate of 1.00 on a few dozen samples is not the same
+    #: claim as 1.00 on a few thousand, and the page must not let a reader assume it is.
+    precision_ci: tuple[float, float] = (0.0, 0.0)
+    recall_ci: tuple[float, float] = (0.0, 0.0)
+    #: How much of the ruleset this evaluation actually says anything about.
+    rules_total: int = 0
+    rules_exercised: int = 0
+    rules_underpowered: list[str] = Field(default_factory=list)
+    rules_unexercised: list[str] = Field(default_factory=list)
+    min_support: int = MIN_SUPPORT
     decoys_recognised: int = 0
     positives_total: int = 0
     positives_at_threshold: int = 0
@@ -257,6 +301,7 @@ def per_rule_confusion(
     for rule_id in rule_ids:
         got, want = fired.get(rule_id, set()), expected.get(rule_id, set())
         tp, fp, fn = len(got & want), len(got - want), len(want - got)
+        support = tp + fn
         rows.append(
             RuleConfusion(
                 rule_id=rule_id,
@@ -264,7 +309,10 @@ def per_rule_confusion(
                 fp=fp,
                 fn=fn,
                 precision=round(tp / (tp + fp), 3) if tp + fp else None,
-                recall=round(tp / (tp + fn), 3) if tp + fn else None,
+                recall=round(tp / support, 3) if support else None,
+                support=support,
+                exercised=support > 0,
+                underpowered=0 < support < MIN_SUPPORT,
             )
         )
     return rows
@@ -339,6 +387,8 @@ def build_result(
     recognised = min(len(flagged_high & decoy_ids), fp)
     all_recall = len(flagged_high & set(positives)) / len(positives) if positives else 0.0
 
+    per_rule = per_rule_confusion(positives, drafts)
+
     return EvalResult(
         seed=seed,
         months=months,
@@ -351,12 +401,19 @@ def build_result(
         precision=precision,
         recall=recall,
         f1=f1,
+        # Precision's denominator is what we flagged; recall's is what was actually there.
+        precision_ci=wilson_interval(tp, tp + fp),
+        recall_ci=wilson_interval(tp, tp + fn),
+        rules_total=len(per_rule),
+        rules_exercised=sum(1 for r in per_rule if r.exercised),
+        rules_underpowered=[r.rule_id for r in per_rule if r.underpowered],
+        rules_unexercised=[r.rule_id for r in per_rule if not r.exercised],
         decoys_recognised=recognised,
         positives_total=len(positives),
         positives_at_threshold=len(at_threshold),
         flagged_total=len(flagged_high),
         recall_all_positives=round(all_recall, 4),
-        per_rule=per_rule_confusion(positives, drafts),
+        per_rule=per_rule,
         decoys=decoys,
         held_out=held_out,
         director_sentence=build_director_sentence(tp, fp, recognised),

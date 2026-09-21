@@ -660,8 +660,25 @@ class DbRepo:
             tp=result.tp,
             fp=result.fp,
             fn=result.fn,
+            precision_ci=list(result.precision_ci),
+            recall_ci=list(result.recall_ci),
+            rules_total=result.rules_total,
+            rules_exercised=result.rules_exercised,
+            rules_underpowered=list(result.rules_underpowered),
+            rules_unexercised=list(result.rules_unexercised),
+            min_support=result.min_support,
             per_rule=[
-                RuleEval(rule_id=r.rule_id, tp=r.tp, fp=r.fp, fn=r.fn, precision=r.precision, recall=r.recall)
+                RuleEval(
+                    rule_id=r.rule_id,
+                    tp=r.tp,
+                    fp=r.fp,
+                    fn=r.fn,
+                    precision=r.precision,
+                    recall=r.recall,
+                    support=r.support,
+                    exercised=r.exercised,
+                    underpowered=r.underpowered,
+                )
                 for r in result.per_rule
             ],
             decoys=[

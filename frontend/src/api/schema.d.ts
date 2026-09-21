@@ -845,6 +845,58 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * CloudPosture
+         * @description Per-provider posture for the multi-cloud panel (SPEC §14 Overview).
+         *
+         *     One row per cloud ATHAR has actually ingested, so the panel reports on the estate in front of
+         *     it rather than asserting three green ticks. `status` is derived, never configured: a cloud
+         *     with no principals this month is `absent`, one whose newest grant predates the current
+         *     snapshot is `stale`, otherwise `current`.
+         */
+        CloudPosture: {
+            /**
+             * Cloud
+             * @enum {string}
+             */
+            cloud: "aws" | "azure" | "gcp";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "stale" | "absent";
+            /**
+             * Identities
+             * @description Identities holding at least one active grant here
+             */
+            identities: number;
+            /** Principals */
+            principals: number;
+            /** Grants */
+            grants: number;
+            /** Findings */
+            findings: number;
+            /** Critical */
+            critical: number;
+            /** High */
+            high: number;
+            /**
+             * Privileged
+             * @description Identities holding control-plane privilege in this cloud
+             */
+            privileged: number;
+            /** Privileged Without Mfa */
+            privileged_without_mfa: number;
+            /**
+             * Privileged Grants
+             * @description Control-plane grants (admin/grant/impersonate) at project scope or above
+             */
+            privileged_grants: number;
+            /** Last Grant Month */
+            last_grant_month?: number | null;
+            /** Last Grant Month Label */
+            last_grant_month_label?: string | null;
+        };
         /** CredentialOut */
         CredentialOut: {
             /** Credential Ref */
@@ -982,6 +1034,9 @@ export interface components {
             findings_by_department: components["schemas"]["DepartmentRollup"][];
             /** Median Score */
             median_score: number;
+            governance: components["schemas"]["GovernanceMetrics"];
+            /** Clouds */
+            clouds: components["schemas"]["CloudPosture"][];
             ledger: components["schemas"]["LedgerBadge"];
             /** Executive Summary */
             executive_summary?: string | null;
@@ -1008,6 +1063,10 @@ export interface components {
             recall: number;
             /** F1 */
             f1: number;
+            /** Precision Ci */
+            precision_ci?: number[];
+            /** Recall Ci */
+            recall_ci?: number[];
             /**
              * Threshold
              * @default High+
@@ -1020,6 +1079,26 @@ export interface components {
             fp: number;
             /** Fn */
             fn: number;
+            /**
+             * Rules Total
+             * @default 0
+             */
+            rules_total: number;
+            /**
+             * Rules Exercised
+             * @default 0
+             */
+            rules_exercised: number;
+            /** Rules Underpowered */
+            rules_underpowered?: string[];
+            /** Rules Unexercised */
+            rules_unexercised?: string[];
+            /**
+             * Min Support
+             * @description Positives a rule needs before its ratio is reportable
+             * @default 10
+             */
+            min_support: number;
             /** Per Rule */
             per_rule: components["schemas"]["RuleEval"][];
             /** Decoys */
@@ -1164,6 +1243,72 @@ export interface components {
             plan?: components["schemas"]["RemediationPlanOut"] | null;
             investigation?: components["schemas"]["InvestigationOut"] | null;
             exception?: components["schemas"]["ExceptionOut"] | null;
+        };
+        /**
+         * GovernanceMetrics
+         * @description The numbers a governance team is actually asked for in a board or audit pack.
+         *
+         *     Deliberately not accuracy metrics: precision/recall on the synthetic estate is a
+         *     pipeline-recovery check (see Evaluation), so putting a 1.00 on the landing page would be
+         *     the least informative number available. These describe the *estate's* posture instead —
+         *     concentration of privilege, MFA coverage where it matters, and how far the worst identity
+         *     can reach — each of which moves when the estate changes and none of which self-grade.
+         */
+        GovernanceMetrics: {
+            /**
+             * Privileged Identities
+             * @description Hold admin/grant/impersonate at project scope or above, in one or more clouds
+             */
+            privileged_identities: number;
+            /** Privileged Pct */
+            privileged_pct: number;
+            /**
+             * Privileged Without Mfa
+             * @description Privileged humans with no MFA enforced
+             */
+            privileged_without_mfa: number;
+            /**
+             * Mfa Coverage Pct
+             * @description Share of privileged humans with MFA enforced
+             */
+            mfa_coverage_pct: number;
+            /**
+             * Cross Cloud Privileged
+             * @description Privileged in two or more clouds
+             */
+            cross_cloud_privileged: number;
+            /**
+             * Blast Radius P90 Pct
+             * @description 90th-percentile percent of estate reachable
+             */
+            blast_radius_p90_pct: number;
+            /** Blast Radius Max Pct */
+            blast_radius_max_pct: number;
+            /**
+             * Risk Concentration Pct
+             * @description Share of total measured blast radius held by the top 5% of identities
+             */
+            risk_concentration_pct: number;
+            /**
+             * Dormant Privileged
+             * @description Privileged and departed, or on a closed contract
+             */
+            dormant_privileged: number;
+            /**
+             * External Privileged
+             * @description Privileged and flagged external/contractor
+             */
+            external_privileged: number;
+            /**
+             * Escalation Paths
+             * @description Identities with at least one escalation path found
+             */
+            escalation_paths: number;
+            /**
+             * Privileged Grants
+             * @description Control-plane grants (admin/grant/impersonate) at project scope or above
+             */
+            privileged_grants: number;
         };
         /** GrantOut */
         GrantOut: {
@@ -1877,6 +2022,24 @@ export interface components {
             precision?: number | null;
             /** Recall */
             recall?: number | null;
+            /**
+             * Support
+             * @description Ground-truth positives for this rule (tp + fn)
+             * @default 0
+             */
+            support: number;
+            /**
+             * Exercised
+             * @description The estate produced at least one positive here
+             * @default false
+             */
+            exercised: boolean;
+            /**
+             * Underpowered
+             * @description Exercised, but on too few positives for the ratio to mean much
+             * @default false
+             */
+            underpowered: boolean;
         };
         /**
          * RuleOut

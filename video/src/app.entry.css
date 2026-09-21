@@ -1,0 +1,22 @@
+/* Tailwind entry for the film.
+ *
+ * The composition renders the dashboard's *real* React components, so it needs the dashboard's
+ * real stylesheet — same tokens, same utilities, same type scale. Rather than copy declarations
+ * (which drift), this pulls in `frontend/src/index.css` verbatim and only widens the scan paths
+ * so utilities used inside `video/src` are emitted too.
+ *
+ * Built by `npm run css` into `src/app.css`, which the composition imports.
+ */
+@import "../../frontend/src/index.css";
+
+@source "../../frontend/src/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
+
+/* The dashboard paints the page background on <body>; inside the film each surface sits on the
+ * cinematic backdrop instead, so the app shell must not paint over it. */
+.athar-surface {
+  color-scheme: light;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Segoe UI Variable Text", "Segoe UI", "IBM Plex Sans", -apple-system, Arial, sans-serif;
+}

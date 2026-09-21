@@ -218,18 +218,24 @@ Seed 42, twelve months, 500 identities, on a laptop:
   is listed pending verification).
 - Agents explain; the rule engine decides. With `LLM_PROVIDER=none` every agent falls back
   to deterministic templates, so the demo never depends on a network call.
-- **R7 (peer outlier) fires on nothing in this estate, on either seed.** It is implemented,
-  registered, tested and offered in the filters, but the generator gives almost every identity
-  grants in all seven service categories, so the department median category count is already the
-  maximum and R7's second term — "at least two categories more than peers" (`SPEC §7`) — can
-  never be satisfied. Reading "more than peers" the other way, as categories fewer than half the
-  department holds, does not rescue it either: measured on seed 42, that fires on nobody at all, in
-  any of the twelve months. The statistical term on its own
-  (grant count above the department median + 2·MAD) does select 25–47 identities a month, so
-  dropping the category term would make R7 fire — but that is a change of rule semantics and a
-  new tuning decision, not a bug fix, so it has not been made under the clock. The honest state
-  is: nine of the eleven rules carry the demo; R7 is a rule whose second term this estate cannot
-  satisfy.
+- **R7 (peer outlier) fires on nothing in the *synthetic* estate, on either seed — but it does
+  fire on real data.** The generator gives almost every identity grants in all seven service
+  categories, so the department median category count is already the maximum and R7's second
+  term — "at least two categories more than peers" (`SPEC §7`) — can never be satisfied. Reading
+  "more than peers" the other way, as categories fewer than half the department holds, does not
+  rescue it either: measured on seed 42, that fires on nobody at all, in any of the twelve months.
+  Pointed at a real `get-account-authorization-details` export, the same unmodified rule fires
+  **35 times** (`real_exports/RESULTS.md`): real estates are lumpy, and the synthetic one was too
+  uniform. So the limitation is a property of the fixture, not of the rule — which is why the
+  rule was left alone rather than retuned to make a demo number appear.
+- **Mapping coverage is a moving target, and the number is published rather than assumed.**
+  The provider tables originally listed only the ~50 services the generator emits, which left
+  2,436 distinct actions unmapped on a real AWS export (30.9% coverage). The service→category
+  catalogue is now derived from the published permission surfaces of all three clouds
+  (`scripts/build_service_catalog.py`), taking AWS to 100% coverage on that export. Azure and
+  GCP sit at 85% and 80% of their published surfaces; every prefix that matched neither the
+  reviewed table nor a documented keyword rule is deliberately left unmapped so it surfaces as
+  R0 instead of being absorbed into a bucket nobody checked.
 - Every ATT&CK and control identifier ATHAR quotes carries a `(verify)` mark, including the ones
   that have been checked: the code marks unconditionally rather than consulting an allowlist, so
   it can never under-mark. `docs/MAPPINGS.md` is where you find out which are actually verified

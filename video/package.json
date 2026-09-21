@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "start": "remotion studio",
-    "render": "remotion render Athar out/athar.mp4 --concurrency=4"
+    "render": "node scripts/build-css.mjs && remotion render Athar out/athar.mp4 --concurrency=4",
+    "css": "node scripts/build-css.mjs",
+    "shots": "node scripts/capture_shots.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.290",
